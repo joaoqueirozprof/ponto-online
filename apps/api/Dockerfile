@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Cache bust to force rebuild
+ARG CACHEBUST=7
+
 # Install ALL deps (including dev for @nestjs/cli, prisma, typescript)
 COPY apps/api/package.json ./
 RUN npm install --include=dev
