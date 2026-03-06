@@ -141,7 +141,6 @@ model Employee {
   timeBalances TimeBalance[]
   punchAdjustments PunchAdjustment[]
   calculationIssues CalculationIssue[]
-  auditLogs AuditLog[]
 
   @@index([branchId])
   @@index([scheduleId])
