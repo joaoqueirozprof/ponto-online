@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { HealthService } from './health.service';
 
@@ -21,5 +21,11 @@ export class HealthController {
   })
   async getHealth() {
     return this.healthService.getHealth();
+  }
+
+  @Post('seed')
+  @ApiOperation({ summary: 'Seed initial data (admin role, permissions, user)' })
+  async seed() {
+    return this.healthService.seedInitialData();
   }
 }

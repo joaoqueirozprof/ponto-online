@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=15
+ARG CACHEBUST=16
 
 # Install build tools for native modules (bcrypt) + OpenSSL for Prisma
 RUN apk add --no-cache python3 make g++ openssl openssl-dev
