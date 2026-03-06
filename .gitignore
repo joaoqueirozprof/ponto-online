@@ -1,0 +1,87 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# Build output
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+turbo.json.bak
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+.sublime-*
+*.code-workspace
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS
+Thumbs.db
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.env.production.local
+.env.development.local
+.env.test.local
+
+# Testing
+.nyc_output/
+.coverage
+
+# Prisma
+prisma/migrations/
+.env.test
+
+# Docker
+.dockerignore
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+backups/
+*.sql.gz
+
+# Yarn
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Misc
+.cache
+.parcel-cache
+.env.*.local
+*.tsbuildinfo

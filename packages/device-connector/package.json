@@ -1,0 +1,22 @@
+{
+  "name": "@ponto/device-connector",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "dotenv": "^16.3.1",
+    "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "tsconfig-paths": "^4.2.0"
+  }
+}

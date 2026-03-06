@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ponto_postgres
+    environment:
+      POSTGRES_USER: ponto
+      POSTGRES_PASSWORD: ponto123
+      POSTGRES_DB: ponto_db
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ponto']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ponto_redis
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: ponto_api
+    environment:
+      DATABASE_URL: postgresql://ponto:ponto123@postgres:5432/ponto_db
+      REDIS_URL: redis://redis:6379
+      API_PORT: 3010
+      API_HOST: 0.0.0.0
+      NODE_ENV: production
+      JWT_SECRET: your-secret-key-change-in-production
+      JWT_REFRESH_SECRET: your-refresh-secret-key-change-in-production
+      CORS_ORIGIN: http://localhost:4010
+    ports:
+      - '3010:3010'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    container_name: ponto_web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3010/api/v1
+      NEXT_PUBLIC_WEB_URL: http://localhost:4010
+    ports:
+      - '4010:3000'
+    depends_on:
+      - api
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+    container_name: ponto_worker
+    environment:
+      DATABASE_URL: postgresql://ponto:ponto123@postgres:5432/ponto_db
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: ponto_nginx
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - web
+    networks:
+      - ponto-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  ponto-network:
+    driver: bridge

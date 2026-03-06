@@ -1,0 +1,102 @@
+services:
+  ponto-db:
+    image: postgres:16-alpine
+    container_name: ponto-db
+    restart: always
+    environment:
+      POSTGRES_DB: ponto_online
+      POSTGRES_USER: ponto_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-PontoSecure2026!}
+    volumes:
+      - ponto-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ponto_admin -d ponto_online"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ponto-network
+
+  ponto-redis:
+    image: redis:7-alpine
+    container_name: ponto-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - ponto-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ponto-network
+
+  ponto-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ponto-api
+    restart: always
+    ports:
+      - "4010:4010"
+    environment:
+      NODE_ENV: production
+      API_PORT: "4010"
+      API_HOST: "0.0.0.0"
+      DATABASE_URL: postgresql://ponto_admin:${DB_PASSWORD:-PontoSecure2026!}@ponto-db:5432/ponto_online
+      REDIS_URL: redis://ponto-redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-this-jwt-secret-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://72.61.129.78:3010}
+    depends_on:
+      ponto-db:
+        condition: service_healthy
+      ponto-redis:
+        condition: service_healthy
+    networks:
+      - ponto-network
+
+  ponto-worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: ponto-worker
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ponto_admin:${DB_PASSWORD:-PontoSecure2026!}@ponto-db:5432/ponto_online
+      REDIS_URL: redis://ponto-redis:6379
+    depends_on:
+      ponto-db:
+        condition: service_healthy
+      ponto-redis:
+        condition: service_healthy
+    networks:
+      - ponto-network
+
+  ponto-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: ponto-web
+    restart: always
+    ports:
+      - "3010:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${API_URL:-http://72.61.129.78:4010/api/v1}
+    depends_on:
+      - ponto-api
+    networks:
+      - ponto-network
+
+volumes:
+  ponto-pgdata:
+    name: ponto-pgdata
+  ponto-redis-data:
+    name: ponto-redis-data
+
+networks:
+  ponto-network:
+    name: ponto-online-network
+    driver: bridge

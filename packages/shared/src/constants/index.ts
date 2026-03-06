@@ -1,0 +1,109 @@
+export const NIGHT_SHIFT_START = 22;
+export const NIGHT_SHIFT_END = 5;
+
+export const STANDARD_WORK_DAY_MINUTES = 480;
+export const STANDARD_WORK_DAY_HOURS = 8;
+
+export const OVERTIME_THRESHOLD_MINUTES = 480;
+
+export const DEFAULT_BREAK_MINUTES = 60;
+
+export const TOLERANCE_MINUTES = 5;
+
+export const PUNCH_TYPES = {
+  ENTRY: 'ENTRY',
+  EXIT: 'EXIT',
+  BREAK_START: 'BREAK_START',
+  BREAK_END: 'BREAK_END',
+} as const;
+
+export const PUNCH_STATUS = {
+  NORMAL: 'NORMAL',
+  ADJUSTED: 'ADJUSTED',
+  MANUAL: 'MANUAL',
+} as const;
+
+export const TIMESHEET_STATUS = {
+  OPEN: 'OPEN',
+  CALCULATED: 'CALCULATED',
+  CLOSED: 'CLOSED',
+  APPROVED: 'APPROVED',
+} as const;
+
+export const DAY_STATUS = {
+  NORMAL: 'NORMAL',
+  HOLIDAY: 'HOLIDAY',
+  WEEKEND: 'WEEKEND',
+  ABSENCE: 'ABSENCE',
+  INCOMPLETE: 'INCOMPLETE',
+} as const;
+
+export const SCHEDULE_TYPE = {
+  FIXED: 'FIXED',
+  ROTATING: 'ROTATING',
+  FLEXIBLE: 'FLEXIBLE',
+} as const;
+
+export const HOLIDAY_TYPE = {
+  NATIONAL: 'NATIONAL',
+  STATE: 'STATE',
+  MUNICIPAL: 'MUNICIPAL',
+  COMPANY: 'COMPANY',
+} as const;
+
+export const ISSUE_TYPE = {
+  MISSING_PUNCH: 'MISSING_PUNCH',
+  OVERTIME_EXCEEDED: 'OVERTIME_EXCEEDED',
+  NO_BREAK: 'NO_BREAK',
+  SCHEDULE_CONFLICT: 'SCHEDULE_CONFLICT',
+  OTHER: 'OTHER',
+} as const;
+
+export const CALCULATION_STATUS = {
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+} as const;
+
+export const DAY_OF_WEEK = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  TUESDAY: 2,
+  WEDNESDAY: 3,
+  THURSDAY: 4,
+  FRIDAY: 5,
+  SATURDAY: 6,
+} as const;
+
+export const MONTHS = {
+  JANUARY: 1,
+  FEBRUARY: 2,
+  MARCH: 3,
+  APRIL: 4,
+  MAY: 5,
+  JUNE: 6,
+  JULY: 7,
+  AUGUST: 8,
+  SEPTEMBER: 9,
+  OCTOBER: 10,
+  NOVEMBER: 11,
+  DECEMBER: 12,
+} as const;
+
+export const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+export const SYNC_TYPES = {
+  PUNCH_SYNC: 'PUNCH_SYNC',
+  EMPLOYEE_SYNC: 'EMPLOYEE_SYNC',
+  AUTO_SYNC: 'AUTO_SYNC',
+} as const;
+
+export const PAGINATION = {
+  DEFAULT_PAGE_SIZE: 10,
+  MAX_PAGE_SIZE: 100,
+} as const;
+
+export const JWT_EXPIRATION = {
+  ACCESS_TOKEN: '15m',
+  REFRESH_TOKEN: '7d',
+} as const;

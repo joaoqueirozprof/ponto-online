@@ -1,0 +1,39 @@
+{
+  "name": "ponto-online",
+  "version": "1.0.0",
+  "description": "Integrated time tracking and payroll system",
+  "private": true,
+  "license": "PROPRIETARY",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "turbo run format",
+    "format:check": "turbo run format:check",
+    "type-check": "turbo run type-check",
+    "db:push": "cd apps/api && pnpm exec prisma db push",
+    "db:migrate": "cd apps/api && pnpm exec prisma migrate dev",
+    "db:seed": "cd apps/api && pnpm exec prisma db seed",
+    "db:studio": "cd apps/api && pnpm exec prisma studio",
+    "turbo:cache:clean": "turbo cache clean",
+    "docker:build": "docker compose -f infra/docker-compose.yml build",
+    "docker:up": "docker compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infra/docker-compose.yml down",
+    "docker:logs": "docker compose -f infra/docker-compose.yml logs -f"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3",
+    "turbo": "^1.11.3"
+  }
+}
