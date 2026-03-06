@@ -6,36 +6,15 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuditModule } from './modules/audit/audit.module';
-
-/**
- * MINIMAL WORKING NESTJS APP MODULE
- *
- * This module has been simplified to include only the essential modules needed for compilation:
- * - PrismaModule: Database connection via Prisma ORM
- * - HealthModule: Basic health check endpoint
- * - AuthModule: JWT authentication with login/register
- * - AuditModule: Audit logging service
- *
- * Other modules have been temporarily disabled to fix compilation errors:
- * - CompaniesModule
- * - BranchesModule
- * - EmployeesModule
- * - DevicesModule
- * - SchedulesModule
- * - PunchesModule
- * - TimesheetsModule
- * - SyncModule
- * - ReportsModule
- *
- * The AuditInterceptor has been disabled as it depends on modules that aren't loaded.
- * Re-enable interceptor once all modules are fixed and imported.
- *
- * To restore full functionality:
- * 1. Fix any TypeScript errors in the disabled modules
- * 2. Uncomment the module imports below
- * 3. Re-enable the APP_INTERCEPTOR provider
- * 4. Test compilation with: npm run build
- */
+import { CompaniesModule } from './modules/companies/companies.module';
+import { BranchesModule } from './modules/branches/branches.module';
+import { EmployeesModule } from './modules/employees/employees.module';
+import { DevicesModule } from './modules/devices/devices.module';
+import { SchedulesModule } from './modules/schedules/schedules.module';
+import { PunchesModule } from './modules/punches/punches.module';
+import { TimesheetsModule } from './modules/timesheets/timesheets.module';
+import { SyncModule } from './modules/sync/sync.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -46,37 +25,21 @@ import { AuditModule } from './modules/audit/audit.module';
         expiresIn: (process.env.JWT_EXPIRATION || '15m') as any,
       },
     }),
-    // Essential modules - always loaded
+    // Core
     PrismaModule,
     HealthModule,
     AuthModule,
     AuditModule,
-
-    // Disabled modules - uncomment to enable
-    // CompaniesModule,
-    // BranchesModule,
-    // EmployeesModule,
-    // DevicesModule,
-    // SchedulesModule,
-    // PunchesModule,
-    // TimesheetsModule,
-    // SyncModule,
-    // ReportsModule,
-
-    // Removed: BullModule - requires Redis connection, disable if not needed
-    // BullModule.forRoot({
-    //   redis: {
-    //     url: process.env.REDIS_URL || 'redis://localhost:6380',
-    //   },
-    // }),
+    // Business modules
+    CompaniesModule,
+    BranchesModule,
+    EmployeesModule,
+    DevicesModule,
+    SchedulesModule,
+    PunchesModule,
+    TimesheetsModule,
+    SyncModule,
+    ReportsModule,
   ],
-  // Disabled: AuditInterceptor requires AuditService and all modules to be loaded
-  // Re-enable once all modules are fixed and imported
-  // providers: [
-  //   {
-  //     provide: APP_INTERCEPTOR,
-  //     useClass: AuditInterceptor,
-  //   },
-  // ],
 })
 export class AppModule {}
