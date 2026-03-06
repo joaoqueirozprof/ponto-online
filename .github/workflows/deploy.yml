@@ -1,0 +1,58 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via Hostinger Docker API
+        env:
+          HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_TOKEN }}
+          VPS_ID: ${{ secrets.VPS_ID }}
+        run: |
+          echo "Deploying ponto-online to VPS..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer $HOSTINGER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"project_name":"ponto-online","content":"https://github.com/joaoqueirozprof/ponto-online"}' \
+            "https://developers.hostinger.com/api/vps/v1/virtual-machines/$VPS_ID/docker")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Deploy failed!"
+            exit 1
+          fi
+
+          echo "Deploy initiated successfully!"
+
+      - name: Wait for deployment
+        run: sleep 60
+
+      - name: Verify deployment
+        env:
+          VPS_IP: ${{ secrets.VPS_IP }}
+        run: |
+          echo "Checking API health..."
+          for i in $(seq 1 10); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$VPS_IP:4010/api/v1" || echo "000")
+            if [ "$HTTP_CODE" -lt 400 ] && [ "$HTTP_CODE" != "000" ]; then
+              echo "API is responding (HTTP $HTTP_CODE)"
+              exit 0
+            fi
+            echo "Attempt $i: API not ready (HTTP $HTTP_CODE), waiting..."
+            sleep 10
+          done
+          echo "Warning: API health check timed out. Check VPS logs."

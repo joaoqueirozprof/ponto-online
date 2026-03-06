@@ -2,25 +2,34 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json pnpm-lock.yaml ./
-COPY . .
+# Copy API package files and install dependencies
+COPY apps/api/package.json ./
+RUN npm install
 
-RUN npm install -g pnpm && pnpm install
+# Copy prisma schema and generate client
+COPY prisma/schema.prisma ./prisma/schema.prisma
+RUN npx prisma generate --schema=prisma/schema.prisma
 
-RUN pnpm run build
+# Copy tsconfig and NestJS config
+COPY apps/api/tsconfig.json ./tsconfig.json
+COPY apps/api/nest-cli.json ./nest-cli.json
 
+# Copy source code
+COPY apps/api/src/ ./src/
+
+# Build with NestJS CLI
+RUN npx nest build
+
+# Production image
 FROM node:20-alpine
 
 WORKDIR /app
 
-RUN npm install -g pnpm
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules/ ./node_modules/
+COPY --from=builder /app/dist/ ./dist/
+COPY --from=builder /app/prisma/ ./prisma/
 
-COPY package*.json pnpm-lock.yaml ./
-RUN pnpm install --prod
-
-COPY --from=builder /app/dist ./dist
-COPY prisma ./prisma
-
-EXPOSE 3010
+EXPOSE 4010
 
 CMD ["node", "dist/main.js"]
