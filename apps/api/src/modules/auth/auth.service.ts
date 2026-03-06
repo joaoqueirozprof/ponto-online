@@ -195,13 +195,13 @@ export class AuthService {
       branchId: user.branchId,
     };
 
-    const accessToken = this.jwtService.sign(payload, {
-      expiresIn: process.env.JWT_EXPIRATION || '15m',
+    const accessToken = this.jwtService.sign(payload as any, {
+      expiresIn: (process.env.JWT_EXPIRATION || '15m') as any,
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
+    const refreshToken = this.jwtService.sign(payload as any, {
       secret: process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key',
-      expiresIn: process.env.JWT_REFRESH_EXPIRATION || '7d',
+      expiresIn: (process.env.JWT_REFRESH_EXPIRATION || '7d') as any,
     });
 
     return {

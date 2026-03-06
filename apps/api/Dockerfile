@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=10
+ARG CACHEBUST=11
 
 # Install build tools for native modules (bcrypt needs make/g++ on Alpine)
 RUN apk add --no-cache python3 make g++
