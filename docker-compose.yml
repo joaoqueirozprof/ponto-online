@@ -4,9 +4,9 @@ services:
     container_name: ponto-db
     restart: always
     environment:
-      POSTGRES_DB: ponto_online
-      POSTGRES_USER: ponto_admin
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-PontoSecure2026!}
+      POSTGRES_DB: "ponto_online"
+      POSTGRES_USER: "ponto_admin"
+      POSTGRES_PASSWORD: "PontoSecure2026"
     volumes:
       - ponto-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -41,14 +41,14 @@ services:
     ports:
       - "4010:4010"
     environment:
-      NODE_ENV: production
+      NODE_ENV: "production"
       API_PORT: "4010"
       API_HOST: "0.0.0.0"
-      DATABASE_URL: postgresql://ponto_admin:${DB_PASSWORD:-PontoSecure2026!}@ponto-db:5432/ponto_online
-      REDIS_URL: redis://ponto-redis:6379
-      JWT_SECRET: ${JWT_SECRET:-change-this-jwt-secret-in-production}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://72.61.129.78:3010}
+      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
+      REDIS_URL: "redis://ponto-redis:6379"
+      JWT_SECRET: "ponto-jwt-secret-2026-prod"
+      JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-prod"
+      CORS_ORIGIN: "http://72.61.129.78:3010"
     depends_on:
       ponto-db:
         condition: service_healthy
@@ -64,9 +64,9 @@ services:
     container_name: ponto-worker
     restart: always
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://ponto_admin:${DB_PASSWORD:-PontoSecure2026!}@ponto-db:5432/ponto_online
-      REDIS_URL: redis://ponto-redis:6379
+      NODE_ENV: "production"
+      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
+      REDIS_URL: "redis://ponto-redis:6379"
     depends_on:
       ponto-db:
         condition: service_healthy
@@ -84,7 +84,7 @@ services:
     ports:
       - "3010:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://72.61.129.78:4010/api/v1}
+      NEXT_PUBLIC_API_URL: "http://72.61.129.78:4010/api/v1"
     depends_on:
       - ponto-api
     networks:
