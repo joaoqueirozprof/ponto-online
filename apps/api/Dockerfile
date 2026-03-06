@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=7
+ARG CACHEBUST=8
 
 # Install ALL deps (including dev for @nestjs/cli, prisma, typescript)
 COPY apps/api/package.json ./
@@ -13,10 +13,15 @@ RUN npm install --include=dev
 COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma || true
 
-# Copy NestJS config and source
+# Copy NestJS config and source (excluding _disabled modules)
 COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json
-COPY apps/api/src/ ./src/
+COPY apps/api/src/main.ts ./src/main.ts
+COPY apps/api/src/app.module.ts ./src/app.module.ts
+COPY apps/api/src/common/ ./src/common/
+COPY apps/api/src/modules/auth/ ./src/modules/auth/
+COPY apps/api/src/modules/audit/ ./src/modules/audit/
+COPY apps/api/src/modules/health/ ./src/modules/health/
 
 # Build NestJS - if fails, create minimal server
 RUN npx nest build 2>&1 || ( \
