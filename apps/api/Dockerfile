@@ -3,7 +3,10 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=8
+ARG CACHEBUST=9
+
+# Install build tools for native modules (bcrypt needs make/g++ on Alpine)
+RUN apk add --no-cache python3 make g++
 
 # Install ALL deps (including dev for @nestjs/cli, prisma, typescript)
 COPY apps/api/package.json ./
