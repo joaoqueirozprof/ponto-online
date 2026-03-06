@@ -1,41 +1,12 @@
 'use client';
-
-import { useEffect, useState } from 'react';
-import { apiClient } from '@/lib/api';
-import DataTable from '@/components/DataTable';
+import ComingSoon from '@/components/ComingSoon';
 
 export default function TimesheetsPage() {
-  const [timesheets, setTimesheets] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchTimesheets();
-  }, []);
-
-  const fetchTimesheets = async () => {
-    try {
-      const response = await apiClient.get('/timesheets?skip=0&take=50');
-      setTimesheets(response.data.data);
-    } catch (error) {
-      console.error('Error fetching timesheets:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const columns = [
-    { key: 'month', label: 'Mês' },
-    { key: 'year', label: 'Ano' },
-    { key: 'status', label: 'Status' },
-    { key: 'totalWorkedMinutes', label: 'Horas Trabalhadas' },
-  ];
-
   return (
-    <div>
-      <h1 className="text-4xl font-bold mb-8">Folhas de Ponto</h1>
-      <div className="card">
-        <DataTable columns={columns} data={timesheets} loading={loading} />
-      </div>
-    </div>
+    <ComingSoon
+      title="Folhas de Ponto"
+      description="Folhas de ponto mensais com cálculo automático de horas trabalhadas, extras, faltas e banco de horas."
+      icon={<svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+    />
   );
 }

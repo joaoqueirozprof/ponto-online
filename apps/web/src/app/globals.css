@@ -13,42 +13,60 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+    'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  @apply bg-gray-50 text-gray-900;
+  @apply bg-slate-50 text-slate-900;
 }
 
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-300;
+}
+
+/* Links */
 a {
-  @apply text-blue-600 hover:text-blue-700 transition-colors;
-}
-
-button {
   @apply transition-colors duration-200;
 }
 
+/* Buttons */
+button {
+  @apply transition-all duration-200;
+}
+
+/* Inputs */
 input,
 textarea,
 select {
-  @apply transition-colors duration-200;
+  @apply transition-all duration-200;
 }
 
-.container {
-  @apply max-w-7xl mx-auto px-4;
-}
-
+/* Utility classes */
 .btn {
-  @apply px-4 py-2 rounded-lg font-medium transition-colors;
+  @apply px-4 py-2.5 rounded-xl font-medium transition-all duration-200 text-sm;
 }
 
 .btn-primary {
-  @apply btn bg-blue-600 text-white hover:bg-blue-700;
+  @apply btn bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm hover:shadow-md;
 }
 
 .btn-secondary {
-  @apply btn bg-gray-600 text-white hover:bg-gray-700;
+  @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300;
 }
 
 .btn-danger {
@@ -56,15 +74,15 @@ select {
 }
 
 .btn-success {
-  @apply btn bg-green-600 text-white hover:bg-green-700;
+  @apply btn bg-emerald-600 text-white hover:bg-emerald-700;
 }
 
 .card {
-  @apply bg-white rounded-lg shadow-md p-6;
+  @apply bg-white rounded-2xl border border-slate-100 p-6;
 }
 
 .input {
-  @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500;
+  @apply w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-400;
 }
 
 .table {
@@ -72,49 +90,41 @@ select {
 }
 
 .table th {
-  @apply bg-gray-100 px-4 py-2 text-left font-semibold border-b border-gray-200;
+  @apply bg-slate-50 px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200;
 }
 
 .table td {
-  @apply px-4 py-2 border-b border-gray-200;
+  @apply px-4 py-3.5 text-sm text-slate-600 border-b border-slate-100;
 }
 
 .table tr:hover {
-  @apply bg-gray-50;
+  @apply bg-slate-50;
 }
 
 .badge {
-  @apply inline-block px-3 py-1 rounded-full text-sm font-medium;
+  @apply inline-flex items-center px-3 py-1 rounded-lg text-xs font-semibold;
 }
 
 .badge-success {
-  @apply badge bg-green-100 text-green-800;
+  @apply badge bg-emerald-50 text-emerald-700;
 }
 
 .badge-danger {
-  @apply badge bg-red-100 text-red-800;
+  @apply badge bg-red-50 text-red-700;
 }
 
 .badge-warning {
-  @apply badge bg-yellow-100 text-yellow-800;
+  @apply badge bg-amber-50 text-amber-700;
 }
 
 .badge-info {
-  @apply badge bg-blue-100 text-blue-800;
-}
-
-.loading {
-  @apply animate-pulse;
+  @apply badge bg-indigo-50 text-indigo-700;
 }
 
 .error {
-  @apply text-red-600 text-sm mt-1;
+  @apply text-red-600 text-sm;
 }
 
 .success {
-  @apply text-green-600 text-sm mt-1;
-}
-
-.text-muted {
-  @apply text-gray-500;
+  @apply text-emerald-600 text-sm;
 }

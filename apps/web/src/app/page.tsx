@@ -10,19 +10,18 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading) {
-      if (isAuthenticated) {
-        router.push('/dashboard');
-      } else {
-        router.push('/login');
-      }
+      router.replace(isAuthenticated ? '/dashboard' : '/login');
     }
   }, [isAuthenticated, loading, router]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Carregando...</p>
+        <div className="relative w-16 h-16 mx-auto mb-4">
+          <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
+          <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
+        </div>
+        <p className="text-slate-500 font-medium">Carregando...</p>
       </div>
     </div>
   );
