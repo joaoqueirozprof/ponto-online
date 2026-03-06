@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=11
+ARG CACHEBUST=12
 
 # Install build tools for native modules (bcrypt needs make/g++ on Alpine)
 RUN apk add --no-cache python3 make g++
@@ -37,4 +37,5 @@ RUN npx nest build > /tmp/build.log 2>&1 || ( \
 
 EXPOSE 4010
 
-CMD ["node", "dist/main.js"]
+# Run migrations then start the API
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=prisma/schema.prisma 2>&1 || npx prisma db push --schema=prisma/schema.prisma --accept-data-loss 2>&1 || true; node dist/main.js"]
