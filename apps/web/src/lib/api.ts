@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3010/api/v1';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://72.61.129.78:4010/api/v1';
 
 let api: AxiosInstance;
 

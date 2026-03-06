@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=2
+ARG CACHEBUST=3
 
 # Install ALL deps including dev
 COPY apps/web/package.json ./
@@ -16,8 +16,9 @@ COPY apps/web/tailwind.config.ts ./tailwind.config.ts
 COPY apps/web/postcss.config.js ./postcss.config.js
 COPY apps/web/src/ ./src/
 
-# Build Next.js - if fails, create minimal web page
+# Set build-time env vars (NEXT_PUBLIC_* must be available at build time)
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_API_URL=http://72.61.129.78:4010/api/v1
 RUN npx next build 2>&1 || ( \
   echo "Next.js build failed, creating minimal web server" && \
   mkdir -p .next && \
