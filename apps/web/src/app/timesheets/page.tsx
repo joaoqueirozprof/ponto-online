@@ -141,6 +141,9 @@ export default function TimesheetsPage() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
+  const [batchApproving, setBatchApproving] = useState(false);
   const pageSize = 15;
 
   // Detail modal
@@ -159,6 +162,7 @@ export default function TimesheetsPage() {
   useEffect(() => {
     fetchTimesheets();
     fetchBranches();
+    setSelectedIds([]);
   }, [currentPage, filterBranch, debouncedSearch, filterMonth, filterYear]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -245,6 +249,40 @@ export default function TimesheetsPage() {
     setConfirmDialog({ isOpen: false, timesheetId: null, message: '' });
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const approvable = timesheets.filter((t) => t.status !== 'APPROVED').map((t) => t.id);
+    if (approvable.length === 0) return;
+    const allSelected = approvable.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !approvable.includes(id)));
+    } else {
+      setSelectedIds((prev) => [...new Set([...prev, ...approvable])]);
+    }
+  };
+
+  const handleBatchApprove = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchApproving(true);
+    try {
+      const response = await apiClient.post('/timesheets/batch-approve', { ids: selectedIds });
+      showToast(response.data.message || `${response.data.approved} folhas aprovadas`, 'success');
+      setSelectedIds([]);
+      setBatchConfirmOpen(false);
+      fetchTimesheets();
+    } catch (error) {
+      showToast('Erro ao aprovar folhas em lote', 'error');
+      console.error(error);
+    } finally {
+      setBatchApproving(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const badgeConfig: Record<string, { bg: string; text: string; label: string }> = {
       OPEN: { bg: 'bg-slate-100', text: 'text-slate-700', label: 'Aberta' },
@@ -274,7 +312,35 @@ export default function TimesheetsPage() {
     return { label: 'Sem registro', color: 'text-orange-500 bg-orange-50' };
   };
 
+  const approvableOnPage = timesheets.filter((t) => t.status !== 'APPROVED').map((t) => t.id);
+  const allPageSelected = approvableOnPage.length > 0 && approvableOnPage.every((id) => selectedIds.includes(id));
+
   const columns = [
+    {
+      key: 'select',
+      label: (
+        <input
+          type="checkbox"
+          checked={allPageSelected}
+          onChange={toggleSelectAll}
+          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          title="Selecionar todos"
+        />
+      ) as any,
+      render: (_: any, row: Timesheet) => (
+        row.status !== 'APPROVED' ? (
+          <input
+            type="checkbox"
+            checked={selectedIds.includes(row.id)}
+            onChange={(e) => { e.stopPropagation(); toggleSelect(row.id); }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          />
+        ) : (
+          <span className="text-slate-300 text-xs">✓</span>
+        )
+      ),
+    },
     {
       key: 'employee',
       label: 'Colaborador',
@@ -375,13 +441,26 @@ export default function TimesheetsPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="space-y-2">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
-            Folhas de Ponto
-          </h1>
-          <p className="text-base text-slate-600">
-            Visualize e gerencie as folhas de ponto dos colaboradores
-          </p>
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+              Folhas de Ponto
+            </h1>
+            <p className="text-base text-slate-600">
+              Visualize e gerencie as folhas de ponto dos colaboradores
+            </p>
+          </div>
+          {selectedIds.length > 0 && (
+            <button
+              onClick={() => setBatchConfirmOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Aprovar em Lote ({selectedIds.length})
+            </button>
+          )}
         </div>
 
         {/* Filters */}
@@ -604,6 +683,39 @@ export default function TimesheetsPage() {
               </button>
               <button onClick={handleConfirmApprove} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors">
                 Aprovar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Approve Confirmation */}
+      {batchConfirmOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm mx-4 border border-slate-200">
+            <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 text-center mb-2">Aprovar em Lote</h2>
+            <p className="text-slate-600 text-sm text-center mb-6">
+              Tem certeza que deseja aprovar <strong>{selectedIds.length}</strong> folha{selectedIds.length > 1 ? 's' : ''} de ponto selecionada{selectedIds.length > 1 ? 's' : ''}?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setBatchConfirmOpen(false)}
+                disabled={batchApproving}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleBatchApprove}
+                disabled={batchApproving}
+                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                {batchApproving ? 'Aprovando...' : `Aprovar ${selectedIds.length}`}
               </button>
             </div>
           </div>

@@ -26,14 +26,22 @@ export class HolidaysController {
     return this.holidaysService.create(createHolidayDto);
   }
 
+  @Post('seed-national')
+  @ApiOperation({ summary: 'Seed Brazilian national holidays for a given year' })
+  seedNational(@Body('year') year: number) {
+    return this.holidaysService.seedNationalHolidays(year || new Date().getFullYear());
+  }
+
   @Get()
   @ApiOperation({ summary: 'List all holidays' })
   findAll(
     @Query('branchId') branchId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 50,
+    @Query('search') search?: string,
+    @Query('year') year?: number,
   ) {
-    return this.holidaysService.findAll(branchId, skip, take);
+    return this.holidaysService.findAll(branchId, skip, take, search, year);
   }
 
   @Get(':id')

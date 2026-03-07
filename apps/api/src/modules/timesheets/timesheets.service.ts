@@ -133,6 +133,26 @@ export class TimesheetsService {
     });
   }
 
+  async batchApproveTimesheets(ids: string[], userId: string) {
+    if (!ids || ids.length === 0) {
+      return { approved: 0, message: 'Nenhuma folha de ponto selecionada' };
+    }
+
+    const result = await this.prisma.timesheet.updateMany({
+      where: {
+        id: { in: ids },
+        status: { not: 'APPROVED' },
+      },
+      data: {
+        status: 'APPROVED',
+        approvedBy: userId,
+        approvedAt: new Date(),
+      },
+    });
+
+    return { approved: result.count, message: `${result.count} folhas de ponto aprovadas com sucesso` };
+  }
+
   async getTimeBalance(employeeId: string, month: number, year: number) {
     let balance = await this.prisma.timeBalance.findUnique({
       where: {

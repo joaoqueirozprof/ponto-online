@@ -162,7 +162,9 @@ export default function SchedulesPage() {
     try {
       setLoading(true);
       const skip = (currentPage - 1) * pageSize;
-      const response = await apiClient.get('/holidays', { params: { skip, take: pageSize } });
+      const params: any = { skip, take: pageSize };
+      if (debouncedSearch) params.search = debouncedSearch;
+      const response = await apiClient.get('/holidays', { params });
       setHolidays(response.data.data || []);
       setTotalCount(response.data.total || 0);
     } catch (error) {
@@ -170,6 +172,19 @@ export default function SchedulesPage() {
       addToast('Erro ao carregar feriados', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSeedHolidays = async () => {
+    try {
+      const year = new Date().getFullYear();
+      const response = await apiClient.post('/holidays/seed-national', { year });
+      addToast(response.data.message || `Feriados nacionais de ${year} criados`, 'success');
+      fetchHolidays();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || 'Erro ao popular feriados';
+      addToast(msg, 'error');
+      console.error(error);
     }
   };
 
@@ -505,15 +520,29 @@ export default function SchedulesPage() {
             className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
           />
         </div>
-        <button
-          onClick={activeTab === 'schedules' ? handleAddSchedule : handleAddHoliday}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:shadow-lg hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 font-medium text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Adicionar {activeTab === 'schedules' ? 'Escala' : 'Feriado'}
-        </button>
+        <div className="flex items-center gap-2">
+          {activeTab === 'holidays' && (
+            <button
+              onClick={handleSeedHolidays}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all duration-200 font-medium text-sm"
+              title="Popular automaticamente os feriados nacionais do ano atual"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+              Popular Feriados {new Date().getFullYear()}
+            </button>
+          )}
+          <button
+            onClick={activeTab === 'schedules' ? handleAddSchedule : handleAddHoliday}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:shadow-lg hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 font-medium text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Adicionar {activeTab === 'schedules' ? 'Escala' : 'Feriado'}
+          </button>
+        </div>
       </div>
 
       {/* Data Tables */}

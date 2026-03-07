@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Param,
   UseGuards,
@@ -50,6 +51,16 @@ export class TimesheetsController {
     @Body('status') status: string,
   ) {
     return this.timesheetsService.updateTimesheetStatus(id, status);
+  }
+
+  @Post('batch-approve')
+  @ApiOperation({ summary: 'Approve multiple timesheets at once' })
+  batchApprove(
+    @Body('ids') ids: string[],
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId || req.user?.sub || req.user?.id || null;
+    return this.timesheetsService.batchApproveTimesheets(ids, userId);
   }
 
   @Patch(':id/approve')
