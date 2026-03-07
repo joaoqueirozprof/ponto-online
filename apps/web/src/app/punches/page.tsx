@@ -93,7 +93,7 @@ export default function PunchesPage() {
       const entries = normData.filter((p: any) => p.punchType === 'ENTRY').length;
       const exits = normData.filter((p: any) => p.punchType === 'EXIT').length;
       setSummary({
-        totalToday: rawRes.data.total || rawData.length,
+        totalToday: rawData.length,
         uniqueEmployees: uniqueEmps.size,
         entriesCount: entries,
         exitsCount: exits,
