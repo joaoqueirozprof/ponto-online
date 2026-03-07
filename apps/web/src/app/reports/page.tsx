@@ -126,9 +126,6 @@ export default function ReportsPage() {
     }
   };
 
-  const currentMonth = new Date().getMonth() + 1;
-  const currentYear = new Date().getFullYear();
-
   return (
     <div className="space-y-6">
       {/* Header */}
