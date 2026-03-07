@@ -6,29 +6,27 @@ import { useEffect, useState } from 'react';
 
 interface RawPunch {
   id: string;
-  deviceName: string;
-  employeeName: string;
-  timestamp: string;
-  recordedAt: string;
+  punchTime: string;
+  device: { id: string; name: string } | null;
+  employee: { id: string; name: string; cpf: string } | null;
 }
 
 interface NormalizedPunch {
   id: string;
-  employeeName: string;
-  timestamp: string;
-  type: string;
+  punchTime: string;
+  punchType: string;
   status: string;
-  recordedAt: string;
+  employee: { id: string; name: string } | null;
 }
 
 interface Adjustment {
   id: string;
-  employeeName: string;
-  date: string;
   originalTime: string;
-  adjustedTime: string;
+  newTime: string;
   reason: string;
-  recordedAt: string;
+  createdAt: string;
+  employee: { id: string; name: string } | null;
+  normalizedPunch: { id: string; punchTime: string } | null;
 }
 
 interface Toast {
@@ -36,6 +34,20 @@ interface Toast {
   type: 'success' | 'error' | 'info';
   message: string;
 }
+
+const PUNCH_TYPE_PT: Record<string, string> = {
+  ENTRY: 'Entrada',
+  EXIT: 'Saída',
+  BREAK_START: 'Início Intervalo',
+  BREAK_END: 'Fim Intervalo',
+};
+
+const PUNCH_STATUS_PT: Record<string, string> = {
+  ORIGINAL: 'Original',
+  ADJUSTED: 'Ajustado',
+  MANUAL: 'Manual',
+  DELETED: 'Excluído',
+};
 
 export default function PunchesPage() {
   const [activeTab, setActiveTab] = useState<'raw' | 'normalized' | 'adjustments'>('raw');
@@ -45,7 +57,7 @@ export default function PunchesPage() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const pageSize = 10;
+  const pageSize = 15;
   const [filterEmployee, setFilterEmployee] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -137,77 +149,178 @@ export default function PunchesPage() {
 
   const formatDateTime = (date: string) => {
     if (!date) return '-';
-    return new Date(date).toLocaleString('pt-BR');
+    try {
+      return new Date(date).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    } catch {
+      return '-';
+    }
   };
 
-  const formatDate = (date: string) => {
+  const formatTime = (date: string) => {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('pt-BR');
+    try {
+      return new Date(date).toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return '-';
+    }
   };
 
   const getStatusBadge = (status: string) => {
     const baseClasses = 'inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold';
+    const label = PUNCH_STATUS_PT[status] || status;
     switch (status) {
-      case 'approved':
-        return (
-          <span className={`${baseClasses} bg-emerald-100 text-emerald-700`}>
-            Aprovado
-          </span>
-        );
-      case 'pending':
-        return (
-          <span className={`${baseClasses} bg-amber-100 text-amber-700`}>
-            Pendente
-          </span>
-        );
-      case 'rejected':
-        return (
-          <span className={`${baseClasses} bg-red-100 text-red-700`}>
-            Rejeitado
-          </span>
-        );
+      case 'ORIGINAL':
+        return <span className={`${baseClasses} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300`}>{label}</span>;
+      case 'ADJUSTED':
+        return <span className={`${baseClasses} bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300`}>{label}</span>;
+      case 'MANUAL':
+        return <span className={`${baseClasses} bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300`}>{label}</span>;
+      case 'DELETED':
+        return <span className={`${baseClasses} bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300`}>{label}</span>;
       default:
-        return (
-          <span className={`${baseClasses} bg-slate-100 text-slate-700`}>
-            {status}
-          </span>
-        );
+        return <span className={`${baseClasses} bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300`}>{label}</span>;
+    }
+  };
+
+  const getTypeBadge = (type: string) => {
+    const baseClasses = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold';
+    const label = PUNCH_TYPE_PT[type] || type;
+    switch (type) {
+      case 'ENTRY':
+        return <span className={`${baseClasses} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300`}>{label}</span>;
+      case 'EXIT':
+        return <span className={`${baseClasses} bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300`}>{label}</span>;
+      case 'BREAK_START':
+        return <span className={`${baseClasses} bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300`}>{label}</span>;
+      case 'BREAK_END':
+        return <span className={`${baseClasses} bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300`}>{label}</span>;
+      default:
+        return <span className={`${baseClasses} bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300`}>{label}</span>;
     }
   };
 
   const rawColumns = [
-    { key: 'deviceName', label: 'Dispositivo' },
-    { key: 'employeeName', label: 'Colaborador' },
-    { key: 'timestamp', label: 'Horário', render: (val: string) => formatDateTime(val) },
+    {
+      key: 'employee',
+      label: 'Colaborador',
+      render: (_: any, row: RawPunch) => (
+        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+          {row.employee?.name || '-'}
+        </div>
+      ),
+    },
+    {
+      key: 'device',
+      label: 'Dispositivo',
+      render: (_: any, row: RawPunch) => (
+        <div className="text-sm text-slate-600 dark:text-slate-400">
+          {row.device?.name || '-'}
+        </div>
+      ),
+    },
+    {
+      key: 'punchTime',
+      label: 'Horário',
+      render: (_: any, row: RawPunch) => (
+        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
+          {formatDateTime(row.punchTime)}
+        </div>
+      ),
+    },
   ];
 
   const normalizedColumns = [
-    { key: 'employeeName', label: 'Colaborador' },
-    { key: 'timestamp', label: 'Horário', render: (val: string) => formatDateTime(val) },
-    { key: 'type', label: 'Tipo' },
+    {
+      key: 'employee',
+      label: 'Colaborador',
+      render: (_: any, row: NormalizedPunch) => (
+        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+          {row.employee?.name || '-'}
+        </div>
+      ),
+    },
+    {
+      key: 'punchTime',
+      label: 'Horário',
+      render: (_: any, row: NormalizedPunch) => (
+        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
+          {formatDateTime(row.punchTime)}
+        </div>
+      ),
+    },
+    {
+      key: 'punchType',
+      label: 'Tipo',
+      render: (_: any, row: NormalizedPunch) => getTypeBadge(row.punchType),
+    },
     {
       key: 'status',
       label: 'Status',
-      render: (status: string) => getStatusBadge(status),
+      render: (_: any, row: NormalizedPunch) => getStatusBadge(row.status),
     },
   ];
 
   const adjustmentColumns = [
-    { key: 'employeeName', label: 'Colaborador' },
-    { key: 'date', label: 'Data', render: (val: string) => formatDate(val) },
-    { key: 'originalTime', label: 'Horário Original' },
-    { key: 'adjustedTime', label: 'Horário Ajustado' },
-    { key: 'reason', label: 'Motivo' },
+    {
+      key: 'employee',
+      label: 'Colaborador',
+      render: (_: any, row: Adjustment) => (
+        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+          {row.employee?.name || '-'}
+        </div>
+      ),
+    },
+    {
+      key: 'originalTime',
+      label: 'Horário Original',
+      render: (_: any, row: Adjustment) => (
+        <div className="text-sm font-mono text-red-600 dark:text-red-400">
+          {formatDateTime(row.originalTime)}
+        </div>
+      ),
+    },
+    {
+      key: 'newTime',
+      label: 'Novo Horário',
+      render: (_: any, row: Adjustment) => (
+        <div className="text-sm font-mono text-emerald-600 dark:text-emerald-400">
+          {formatDateTime(row.newTime)}
+        </div>
+      ),
+    },
+    {
+      key: 'reason',
+      label: 'Motivo',
+      render: (_: any, row: Adjustment) => (
+        <div className="text-sm text-slate-600 dark:text-slate-400 max-w-xs truncate">
+          {row.reason || '-'}
+        </div>
+      ),
+    },
+    {
+      key: 'createdAt',
+      label: 'Data Ajuste',
+      render: (_: any, row: Adjustment) => (
+        <div className="text-sm font-mono text-slate-500 dark:text-slate-400">
+          {formatDateTime(row.createdAt)}
+        </div>
+      ),
+    },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-6 md:p-8">
       {/* Toast Container */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium animation-slideIn ${
+            className={`px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium ${
               toast.type === 'error'
                 ? 'bg-red-500'
                 : toast.type === 'success'
@@ -220,19 +333,19 @@ export default function PunchesPage() {
         ))}
       </div>
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header Section */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Registros de Ponto</h1>
-          <p className="text-slate-400">Visualize e gerencie todos os registros de ponto</p>
+        <div className="space-y-2">
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Registros de Ponto</h1>
+          <p className="text-base text-slate-600 dark:text-slate-400">Visualize e gerencie todos os registros de ponto</p>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex gap-2 mb-8 bg-slate-800 rounded-xl p-1 inline-flex">
+        <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm inline-flex">
           {(['raw', 'normalized', 'adjustments'] as const).map((tab) => {
             const labels = {
               raw: 'Registros Brutos',
-              normalized: 'Registros Normalizados',
+              normalized: 'Normalizados',
               adjustments: 'Ajustes',
             };
             return (
@@ -245,7 +358,7 @@ export default function PunchesPage() {
                 className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 ${
                   activeTab === tab
                     ? 'bg-indigo-600 text-white shadow-lg'
-                    : 'text-slate-400 hover:text-slate-200'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}
               >
                 {labels[tab]}
@@ -255,12 +368,12 @@ export default function PunchesPage() {
         </div>
 
         {/* Filters Section */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 mb-8">
-          <h2 className="text-slate-200 font-semibold mb-4">Filtros</h2>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Filtros</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Employee Filter */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
                 Colaborador
               </label>
               <select
@@ -269,7 +382,7 @@ export default function PunchesPage() {
                   setFilterEmployee(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full px-4 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
+                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
               >
                 <option value="">Todos os colaboradores</option>
                 {employees.map((emp) => (
@@ -280,11 +393,11 @@ export default function PunchesPage() {
               </select>
             </div>
 
-            {/* Start Date Filter - Only for Raw and Normalized tabs */}
+            {/* Start Date Filter */}
             {(activeTab === 'raw' || activeTab === 'normalized') && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
                     Data Inicial
                   </label>
                   <input
@@ -294,13 +407,12 @@ export default function PunchesPage() {
                       setStartDate(e.target.value);
                       setCurrentPage(1);
                     }}
-                    className="w-full px-4 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                   />
                 </div>
 
-                {/* End Date Filter */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
                     Data Final
                   </label>
                   <input
@@ -310,7 +422,7 @@ export default function PunchesPage() {
                       setEndDate(e.target.value);
                       setCurrentPage(1);
                     }}
-                    className="w-full px-4 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                   />
                 </div>
               </>
@@ -319,7 +431,7 @@ export default function PunchesPage() {
         </div>
 
         {/* Data Table Section */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
           {activeTab === 'raw' && (
             <DataTable
               columns={rawColumns}

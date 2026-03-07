@@ -116,7 +116,7 @@ export default function TimesheetsPage() {
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     try {
-      await apiClient.patch(`/timesheets/${id}`, { status: newStatus });
+      await apiClient.patch(`/timesheets/${id}/status`, { status: newStatus });
       showToast('Status da folha atualizado com sucesso', 'success');
       fetchTimesheets();
     } catch (error) {
@@ -136,7 +136,7 @@ export default function TimesheetsPage() {
   const handleConfirmApprove = async () => {
     if (!confirmDialog.timesheetId) return;
     try {
-      await apiClient.patch(`/timesheets/${confirmDialog.timesheetId}`, { status: 'APPROVED' });
+      await apiClient.patch(`/timesheets/${confirmDialog.timesheetId}/status`, { status: 'APPROVED' });
       showToast('Folha de ponto aprovada com sucesso', 'success');
       setConfirmDialog({ isOpen: false, timesheetId: null, message: '' });
       fetchTimesheets();
