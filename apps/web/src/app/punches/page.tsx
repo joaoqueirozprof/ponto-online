@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 interface RawPunch {
   id: string;
   punchTime: string;
+  source?: string;
   device: { id: string; name: string } | null;
   employee: { id: string; name: string; cpf: string } | null;
 }
@@ -316,6 +317,22 @@ export default function PunchesPage() {
           {formatDateTime(row.punchTime)}
         </div>
       ),
+    },
+    {
+      key: 'source',
+      label: 'Fonte',
+      render: (_: any, row: RawPunch) => {
+        const isManual = row.source === 'MANUAL' || row.device?.name === 'Registro Manual';
+        return (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+            isManual
+              ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300'
+              : 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300'
+          }`}>
+            {isManual ? '✍ Manual' : '📟 REP'}
+          </span>
+        );
+      },
     },
   ];
 

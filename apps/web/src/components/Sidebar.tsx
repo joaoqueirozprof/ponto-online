@@ -91,13 +91,8 @@ const menuSections = [
           </svg>
         ),
       },
-    ],
-  },
-  {
-    title: 'Gestao',
-    items: [
       {
-        label: 'Relatorios',
+        label: 'Relatórios',
         href: '/reports',
         icon: (
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -131,7 +126,7 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-3 space-y-3 overflow-y-auto">
         {menuSections.map((section) => (
           <div key={section.title}>
             <div className="px-3 mb-2">
@@ -146,7 +141,7 @@ export default function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                       isActive
                         ? 'bg-indigo-500/10 text-indigo-400'
                         : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
