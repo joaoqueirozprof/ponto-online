@@ -57,6 +57,12 @@ export class PunchesController {
     return this.punchesService.adjustPunch(id, adjustPunchDto);
   }
 
+  @Post('fix-afd-source')
+  @ApiOperation({ summary: 'Fix AFD-imported records source from MANUAL to AFD and assign proper REP devices' })
+  fixAfdSource() {
+    return this.punchesService.fixAfdSourceRecords();
+  }
+
   @Get('adjustments')
   @ApiOperation({ summary: 'Get punch adjustments history' })
   getPunchAdjustments(

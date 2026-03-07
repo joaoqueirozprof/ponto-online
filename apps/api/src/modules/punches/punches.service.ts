@@ -157,6 +157,113 @@ export class PunchesService {
     return normalizedPunch;
   }
 
+  async fixAfdSourceRecords() {
+    // 1. Create proper REP devices for each branch (if they don't exist)
+    const branches = await this.prisma.branch.findMany();
+    const repDevices: Record<string, any> = {};
+
+    for (const branch of branches) {
+      let repDevice = await this.prisma.device.findFirst({
+        where: { serialNumber: `REP-${branch.code || branch.name.toUpperCase().replace(/\s+/g, '-')}` },
+      });
+
+      if (!repDevice) {
+        repDevice = await this.prisma.device.create({
+          data: {
+            name: `REP ${branch.name}`,
+            serialNumber: `REP-${branch.code || branch.name.toUpperCase().replace(/\s+/g, '-')}`,
+            model: 'Henry Orion 6',
+            branchId: branch.id,
+            ipAddress: '192.168.1.100',
+            port: 3000,
+            login: 'admin',
+            encryptedPassword: 'encrypted',
+            isActive: true,
+          },
+        });
+      }
+
+      repDevices[branch.id] = repDevice;
+    }
+
+    // 2. Get the manual device
+    const manualDevice = await this.prisma.device.findFirst({
+      where: { serialNumber: 'MANUAL-ENTRY' },
+    });
+
+    if (!manualDevice) {
+      return { message: 'No manual device found, nothing to fix', updated: 0 };
+    }
+
+    // 3. Update all raw punch events that have source=MANUAL and reason "Importação AFD"
+    // First, get employees grouped by branch to know which REP device to assign
+    const employees = await this.prisma.employee.findMany({
+      select: { id: true, branchId: true },
+    });
+
+    const employeeBranch: Record<string, string> = {};
+    for (const emp of employees) {
+      if (emp.branchId) employeeBranch[emp.id] = emp.branchId;
+    }
+
+    // 4. Update records in batches by branch
+    let totalUpdated = 0;
+
+    for (const branch of branches) {
+      const branchEmployeeIds = employees
+        .filter(e => e.branchId === branch.id)
+        .map(e => e.id);
+
+      if (branchEmployeeIds.length === 0) continue;
+
+      const repDevice = repDevices[branch.id];
+
+      // Update raw punch events for this branch's employees
+      const result = await this.prisma.rawPunchEvent.updateMany({
+        where: {
+          source: 'MANUAL',
+          deviceId: manualDevice.id,
+          employeeId: { in: branchEmployeeIds },
+        },
+        data: {
+          source: 'AFD',
+          deviceId: repDevice.id,
+        },
+      });
+
+      totalUpdated += result.count;
+    }
+
+    // 5. Also update any records without employeeId
+    const orphanResult = await this.prisma.rawPunchEvent.updateMany({
+      where: {
+        source: 'MANUAL',
+        deviceId: manualDevice.id,
+      },
+      data: {
+        source: 'AFD',
+      },
+    });
+
+    totalUpdated += orphanResult.count;
+
+    // 6. Delete the manual device if no records left pointing to it
+    const remainingManual = await this.prisma.rawPunchEvent.count({
+      where: { deviceId: manualDevice.id },
+    });
+
+    if (remainingManual === 0) {
+      await this.prisma.device.delete({ where: { id: manualDevice.id } });
+    }
+
+    return {
+      message: 'AFD records fixed successfully',
+      totalUpdated,
+      devicesCreated: Object.keys(repDevices).length,
+      manualDeviceDeleted: remainingManual === 0,
+    };
+  }
+
   async getPunchAdjustments(employeeId?: string, skip: any = 0, take: any = 50) {
     skip = Number(skip) || 0;
     take = Number(take) || 50;

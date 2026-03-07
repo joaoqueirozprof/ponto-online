@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-ARG CACHEBUST=41
+ARG CACHEBUST=42
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Force rebuild - build 41
-RUN echo "build-41-timesheets-calculate-v2"
+RUN echo "build-42-fix-afd-source"
 
 # Copy config and source
 COPY apps/api/tsconfig.json ./tsconfig.json
@@ -34,5 +34,5 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 41
+# CACHEBUST 42
 CMD ["./entrypoint.sh"]
