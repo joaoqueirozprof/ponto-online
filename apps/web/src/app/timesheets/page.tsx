@@ -283,6 +283,35 @@ export default function TimesheetsPage() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (timesheets.length === 0) {
+      showToast('Nenhuma folha de ponto para exportar', 'error');
+      return;
+    }
+    const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const headers = ['Colaborador', 'Filial', 'Período', 'Status', 'Horas Trabalhadas', 'Horas Extras', 'Atrasos', 'Saldo'];
+    const rows = timesheets.map((ts) => [
+      ts.employee?.name || '-',
+      ts.employee?.branch?.name || '-',
+      `${monthNames[ts.month - 1]}/${ts.year}`,
+      ts.status === 'OPEN' ? 'Aberta' : ts.status === 'APPROVED' ? 'Aprovada' : ts.status === 'CALCULATED' ? 'Calculada' : ts.status,
+      `${Math.floor((ts.totalWorkedMinutes || 0) / 60)}:${String((ts.totalWorkedMinutes || 0) % 60).padStart(2, '0')}`,
+      `${Math.floor((ts.totalOvertimeMinutes || 0) / 60)}:${String((ts.totalOvertimeMinutes || 0) % 60).padStart(2, '0')}`,
+      `${Math.floor((ts.totalLateMinutes || 0) / 60)}:${String((ts.totalLateMinutes || 0) % 60).padStart(2, '0')}`,
+      `${Math.floor(Math.abs(ts.totalBalanceMinutes || 0) / 60)}:${String(Math.abs(ts.totalBalanceMinutes || 0) % 60).padStart(2, '0')}${(ts.totalBalanceMinutes || 0) < 0 ? ' (neg)' : ''}`,
+    ]);
+    const csvContent = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `folhas-ponto-${monthNames[filterMonth - 1].toLowerCase()}-${filterYear}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV exportado com sucesso!');
+  };
+
   const getStatusBadge = (status: string) => {
     const badgeConfig: Record<string, { bg: string; text: string; label: string }> = {
       OPEN: { bg: 'bg-slate-100', text: 'text-slate-700', label: 'Aberta' },
@@ -450,17 +479,28 @@ export default function TimesheetsPage() {
               Visualize e gerencie as folhas de ponto dos colaboradores
             </p>
           </div>
-          {selectedIds.length > 0 && (
+          <div className="flex items-center gap-2">
+            {selectedIds.length > 0 && (
+              <button
+                onClick={() => setBatchConfirmOpen(true)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Aprovar em Lote ({selectedIds.length})
+              </button>
+            )}
             <button
-              onClick={() => setBatchConfirmOpen(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
+              onClick={handleExportCSV}
+              className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 active:bg-orange-700 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              Aprovar em Lote ({selectedIds.length})
+              Exportar CSV
             </button>
-          )}
+          </div>
         </div>
 
         {/* Filters */}
