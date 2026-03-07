@@ -23,10 +23,11 @@ RUN npx nest build
 
 # Copy update scripts
 COPY scripts/update-employee-data.js ./scripts/update-employee-data.js
+COPY scripts/fix-unmatched-employees.js ./scripts/fix-unmatched-employees.js
 COPY apps/api/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 27
+# CACHEBUST 28
 CMD ["./entrypoint.sh"]
