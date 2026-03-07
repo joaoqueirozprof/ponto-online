@@ -6,7 +6,7 @@ export class TimesheetsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getTimesheet(employeeId: string, month: number, year: number) {
-    let timesheet = await this.prisma.timesheet.findUnique({
+    let timesheet: any = await this.prisma.timesheet.findUnique({
       where: {
         employeeId_month_year: {
           employeeId,
@@ -86,7 +86,7 @@ export class TimesheetsService {
     return this.prisma.timesheet.update({
       where: { id: timesheetId },
       data: {
-        status,
+        status: status as any,
         ...(status === 'CALCULATED' && { calculatedAt: new Date() }),
         ...(status === 'APPROVED' && { approvedAt: new Date() }),
       },
