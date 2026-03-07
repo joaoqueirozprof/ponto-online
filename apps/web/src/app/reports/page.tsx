@@ -140,7 +140,9 @@ const formatHHMM = (minutes: number | undefined | null): string => {
 
 const formatBrazilianDate = (dateString: string): string => {
   try {
-    const date = new Date(dateString + 'T12:00:00');
+    const datePart = dateString?.includes('T') ? dateString.split('T')[0] : dateString;
+    const date = new Date(datePart + 'T12:00:00');
+    if (isNaN(date.getTime())) return '-';
     return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
   } catch {
     return '-';
@@ -149,7 +151,9 @@ const formatBrazilianDate = (dateString: string): string => {
 
 const getDayName = (dateString: string): string => {
   try {
-    const date = new Date(dateString + 'T12:00:00');
+    const datePart = dateString?.includes('T') ? dateString.split('T')[0] : dateString;
+    const date = new Date(datePart + 'T12:00:00');
+    if (isNaN(date.getTime())) return '';
     return DAY_NAMES_FULL[date.getDay()] || '';
   } catch {
     return '';
