@@ -15,6 +15,9 @@ RUN npm install
 COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
+# Force rebuild - build 35
+RUN echo "build-35"
+
 # Copy config and source
 COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json
