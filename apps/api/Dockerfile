@@ -20,8 +20,15 @@ COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json
 COPY apps/api/src/ ./src/
 
-# Build NestJS
-RUN npx nest build
+# Build NestJS - capture full output for debugging
+RUN npx nest build > /tmp/nest-build.log 2>&1; BUILD_EXIT=$?; \
+    if [ $BUILD_EXIT -ne 0 ]; then \
+      echo "=== NEST BUILD FAILED (exit $BUILD_EXIT) ==="; \
+      echo "=== FULL OUTPUT ==="; \
+      cat /tmp/nest-build.log; \
+      echo "=== END OUTPUT ==="; \
+      exit 1; \
+    fi; echo "BUILD_SUCCESS"
 
 # Copy update scripts
 COPY scripts/update-employee-data.js ./scripts/update-employee-data.js
