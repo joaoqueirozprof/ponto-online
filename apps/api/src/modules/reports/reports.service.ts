@@ -120,7 +120,7 @@ export class ReportsService {
         employee: { branchId },
         month,
         year,
-        status: 'APPROVED',
+        status: { in: ['CALCULATED', 'APPROVED', 'CLOSED'] },
       },
       include: {
         employee: {

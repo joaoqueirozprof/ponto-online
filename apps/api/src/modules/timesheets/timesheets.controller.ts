@@ -6,6 +6,7 @@ import {
   UseGuards,
   Query,
   Body,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -51,8 +52,9 @@ export class TimesheetsController {
   @ApiOperation({ summary: 'Approve timesheet' })
   approve(
     @Param('id') id: string,
-    @Body('userId') userId: string,
+    @Req() req: any,
   ) {
+    const userId = req.user?.userId || req.user?.sub || req.user?.id || null;
     return this.timesheetsService.approveTimesheet(id, userId);
   }
 

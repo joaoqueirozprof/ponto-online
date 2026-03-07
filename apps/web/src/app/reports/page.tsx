@@ -788,7 +788,7 @@ export default function ReportsPage() {
             <div className="print:hidden">
               <div className="bg-slate-800/60 rounded-xl border border-slate-700/50 p-5 sticky top-4">
                 <h2 className="text-lg font-bold text-white mb-1">Folha de Pagamento</h2>
-                <p className="text-xs text-slate-400 mb-5">Somente timesheets aprovados</p>
+                <p className="text-xs text-slate-400 mb-5">Timesheets calculados, aprovados ou fechados</p>
                 <form onSubmit={handlePayrollReport} className="space-y-4">
                   <FormSelect label="Filial" value={payrollReport.branchId} onChange={(v) => setPayrollReport({ ...payrollReport, branchId: v })}>
                     <option value="">Selecione...</option>
