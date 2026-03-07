@@ -141,10 +141,10 @@ export class TimesheetsService {
     const result = await this.prisma.timesheet.updateMany({
       where: {
         id: { in: ids },
-        status: { not: 'APPROVED' },
+        status: { not: 'APPROVED' as any },
       },
       data: {
-        status: 'APPROVED',
+        status: 'APPROVED' as any,
         approvedBy: userId,
         approvedAt: new Date(),
       },

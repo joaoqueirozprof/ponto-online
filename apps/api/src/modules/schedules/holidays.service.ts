@@ -108,7 +108,7 @@ export class HolidaysService {
     // Corpus Christi: 60 days after Easter
     const corpusChristi = new Date(easterMs + 60 * 24 * 60 * 60 * 1000);
 
-    const holidays = [
+    const holidays: any[] = [
       { name: 'Confraternização Universal', date: new Date(year, 0, 1), type: 'NATIONAL' },
       { name: 'Carnaval (Segunda)', date: carnivalMonday, type: 'NATIONAL' },
       { name: 'Carnaval (Terça)', date: carnival, type: 'NATIONAL' },
