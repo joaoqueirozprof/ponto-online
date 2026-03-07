@@ -48,7 +48,7 @@ export class TimesheetsService {
     });
   }
 
-  async listTimesheets(branchId?: string, skip: any = 0, take: any = 10, search?: string) {
+  async listTimesheets(branchId?: string, skip: any = 0, take: any = 10, search?: string, month?: number, year?: number, status?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
     const where: any = {};
@@ -63,6 +63,15 @@ export class TimesheetsService {
         name: { contains: search, mode: 'insensitive' },
       };
     }
+    if (month) {
+      where.month = Number(month);
+    }
+    if (year) {
+      where.year = Number(year);
+    }
+    if (status) {
+      where.status = status;
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.timesheet.findMany({
@@ -74,7 +83,7 @@ export class TimesheetsService {
             select: { id: true, name: true, cpf: true, branch: { select: { id: true, name: true } } },
           },
         },
-        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+        orderBy: [{ year: 'desc' }, { month: 'desc' }, { employee: { name: 'asc' } }],
       }),
       this.prisma.timesheet.count({ where }),
     ]);

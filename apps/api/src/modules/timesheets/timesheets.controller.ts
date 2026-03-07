@@ -23,11 +23,14 @@ export class TimesheetsController {
   @ApiOperation({ summary: 'List timesheets' })
   listTimesheets(
     @Query('branchId') branchId?: string,
+    @Query('month') month?: number,
+    @Query('year') year?: number,
+    @Query('status') status?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
     @Query('search') search?: string,
   ) {
-    return this.timesheetsService.listTimesheets(branchId, skip, take, search);
+    return this.timesheetsService.listTimesheets(branchId, skip, take, search, month, year, status);
   }
 
   @Get(':employeeId/:month/:year')

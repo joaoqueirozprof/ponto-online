@@ -172,15 +172,12 @@ export default function TimesheetsPage() {
     try {
       setLoading(true);
       const skip = (currentPage - 1) * pageSize;
-      const params: any = { skip, take: pageSize };
+      const params: any = { skip, take: pageSize, month: filterMonth, year: filterYear };
       if (filterBranch) params.branchId = filterBranch;
       if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/timesheets', { params });
-      // Filter by month/year client-side since backend may not support it
-      const allData = response.data.data || [];
-      const filtered = allData.filter((ts: Timesheet) => ts.month === filterMonth && ts.year === filterYear);
-      setTimesheets(filtered);
-      setTotalCount(filtered.length);
+      setTimesheets(response.data.data || []);
+      setTotalCount(response.data.total || 0);
     } catch (error) {
       showToast('Erro ao carregar folhas de ponto', 'error');
       console.error(error);
