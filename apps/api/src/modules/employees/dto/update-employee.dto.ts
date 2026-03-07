@@ -3,6 +3,11 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 export class UpdateEmployeeDto {
+  @ApiProperty({ example: 'branch-id-123', required: false })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @ApiProperty({ example: 'João da Silva', required: false })
   @IsOptional()
   @IsString()
