@@ -14,14 +14,34 @@ interface Employee {
   position: string;
   department: string;
   branch: { id: string; name: string };
+  schedule: { id: string; name: string; type: string } | null;
   status: 'active' | 'inactive';
   admissionDate: string;
   branchId: string;
+  scheduleId: string | null;
 }
 
 interface Branch {
   id: string;
   name: string;
+}
+
+interface ScheduleOption {
+  id: string;
+  name: string;
+  type: string;
+  branch: { id: string; name: string };
+  scheduleEntries: ScheduleEntry[];
+}
+
+interface ScheduleEntry {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  breakStartTime: string;
+  breakEndTime: string;
+  breakMinutes: number;
+  isWorkDay: boolean;
 }
 
 interface Toast {
@@ -39,7 +59,10 @@ interface FormData {
   department: string;
   branchId: string;
   admissionDate: string;
+  scheduleId: string;
 }
+
+const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
 const initialFormData: FormData = {
   name: '',
@@ -50,11 +73,13 @@ const initialFormData: FormData = {
   department: '',
   branchId: '',
   admissionDate: '',
+  scheduleId: '',
 };
 
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,6 +92,7 @@ export default function EmployeesPage() {
   const [formData, setFormData] = useState<FormData>(initialFormData);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedScheduleEntries, setSelectedScheduleEntries] = useState<ScheduleEntry[]>([]);
 
   useEffect(() => {
     fetchEmployees();
@@ -80,6 +106,30 @@ export default function EmployeesPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  // Fetch schedules when branch changes in form
+  useEffect(() => {
+    if (formData.branchId) {
+      fetchSchedulesForBranch(formData.branchId);
+    } else {
+      setSchedules([]);
+    }
+  }, [formData.branchId]);
+
+  // Update schedule preview when scheduleId changes
+  useEffect(() => {
+    if (formData.scheduleId) {
+      const found = schedules.find((s) => s.id === formData.scheduleId);
+      if (found && found.scheduleEntries) {
+        setSelectedScheduleEntries(found.scheduleEntries);
+      } else {
+        // Fetch from API if not in local list
+        fetchScheduleDetails(formData.scheduleId);
+      }
+    } else {
+      setSelectedScheduleEntries([]);
+    }
+  }, [formData.scheduleId, schedules]);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -116,9 +166,30 @@ export default function EmployeesPage() {
     }
   };
 
+  const fetchSchedulesForBranch = async (branchId: string) => {
+    try {
+      const response = await apiClient.get('/schedules', { params: { branchId, take: 999 } });
+      setSchedules(response.data.data || []);
+    } catch (error) {
+      console.error('Erro ao carregar escalas', error);
+    }
+  };
+
+  const fetchScheduleDetails = async (scheduleId: string) => {
+    try {
+      const response = await apiClient.get(`/schedules/${scheduleId}`);
+      if (response.data?.scheduleEntries) {
+        setSelectedScheduleEntries(response.data.scheduleEntries);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar detalhes da escala', error);
+    }
+  };
+
   const handleAddClick = () => {
     setEditingId(null);
     setFormData(initialFormData);
+    setSelectedScheduleEntries([]);
     setShowModal(true);
   };
 
@@ -127,12 +198,13 @@ export default function EmployeesPage() {
     setFormData({
       name: employee.name,
       cpf: employee.cpf,
-      email: employee.email,
-      phone: employee.phone,
-      position: employee.position,
-      department: employee.department,
-      branchId: employee.branchId,
-      admissionDate: employee.admissionDate,
+      email: employee.email || '',
+      phone: employee.phone || '',
+      position: employee.position || '',
+      department: employee.department || '',
+      branchId: employee.branchId || employee.branch?.id || '',
+      admissionDate: employee.admissionDate ? employee.admissionDate.split('T')[0] : '',
+      scheduleId: employee.scheduleId || employee.schedule?.id || '',
     });
     setShowModal(true);
   };
@@ -140,11 +212,15 @@ export default function EmployeesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload: any = {
+        ...formData,
+        scheduleId: formData.scheduleId || null,
+      };
       if (editingId) {
-        await apiClient.put(`/employees/${editingId}`, formData);
+        await apiClient.patch(`/employees/${editingId}`, payload);
         addToast('Colaborador atualizado com sucesso', 'success');
       } else {
-        await apiClient.post('/employees', formData);
+        await apiClient.post('/employees', payload);
         addToast('Colaborador criado com sucesso', 'success');
       }
       setShowModal(false);
@@ -169,40 +245,24 @@ export default function EmployeesPage() {
   };
 
   const columns = [
-    {
-      key: 'name',
-      label: 'Nome',
-    },
-    {
-      key: 'cpf',
-      label: 'CPF',
-    },
-    {
-      key: 'position',
-      label: 'Cargo',
-    },
-    {
-      key: 'department',
-      label: 'Departamento',
-    },
+    { key: 'name', label: 'Nome' },
+    { key: 'cpf', label: 'CPF' },
+    { key: 'position', label: 'Cargo' },
+    { key: 'department', label: 'Departamento' },
     {
       key: 'branch',
       label: 'Filial',
       render: (branch: Branch) => branch?.name || '-',
     },
     {
-      key: 'status',
-      label: 'Status',
-      render: (status: string) => (
-        <span
-          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-            status === 'active'
-              ? 'bg-emerald-100 text-emerald-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
-          {status === 'active' ? 'Ativo' : 'Inativo'}
+      key: 'schedule',
+      label: 'Escala',
+      render: (schedule: any) => schedule?.name ? (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+          {schedule.name}
         </span>
+      ) : (
+        <span className="text-slate-400 text-xs">Sem escala</span>
       ),
     },
     {
@@ -211,19 +271,13 @@ export default function EmployeesPage() {
       render: (id: string, row: Employee) => (
         <div className="flex gap-2">
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleEditClick(row);
-            }}
+            onClick={(e) => { e.stopPropagation(); handleEditClick(row); }}
             className="px-3 py-1 text-sm bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors font-medium"
           >
             Editar
           </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowDeleteConfirm(id);
-            }}
+            onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(id); }}
             className="px-3 py-1 text-sm bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors font-medium"
           >
             Deletar
@@ -262,17 +316,12 @@ export default function EmployeesPage() {
             <label className="block text-sm font-semibold text-slate-700 mb-2">Filtrar por Filial</label>
             <select
               value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => { setFilterBranch(e.target.value); setCurrentPage(1); }}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-700"
             >
               <option value="">Todas as filiais</option>
               {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
+                <option key={branch.id} value={branch.id}>{branch.name}</option>
               ))}
             </select>
           </div>
@@ -301,7 +350,7 @@ export default function EmployeesPage() {
       />
 
       {/* Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Editar Colaborador' : 'Novo Colaborador'}>
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Editar Colaborador' : 'Novo Colaborador'} size="xl">
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -329,14 +378,13 @@ export default function EmployeesPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Email*</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Email</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
                 placeholder="email@example.com"
-                required
               />
             </div>
 
@@ -352,26 +400,24 @@ export default function EmployeesPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Cargo*</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Cargo</label>
               <input
                 type="text"
                 value={formData.position}
                 onChange={(e) => setFormData({ ...formData, position: e.target.value })}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
-                placeholder="Ex: Desenvolvedor"
-                required
+                placeholder="Ex: Auxiliar"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Departamento*</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Departamento</label>
               <input
                 type="text"
                 value={formData.department}
                 onChange={(e) => setFormData({ ...formData, department: e.target.value })}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
-                placeholder="Ex: TI"
-                required
+                placeholder="Ex: Açougue"
               />
             </div>
 
@@ -379,15 +425,13 @@ export default function EmployeesPage() {
               <label className="block text-sm font-semibold text-slate-700 mb-2">Filial*</label>
               <select
                 value={formData.branchId}
-                onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, branchId: e.target.value, scheduleId: '' })}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
                 required
               >
                 <option value="">Selecione uma filial</option>
                 {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
                 ))}
               </select>
             </div>
@@ -401,6 +445,78 @@ export default function EmployeesPage() {
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
               />
             </div>
+          </div>
+
+          {/* Schedule Selection */}
+          <div className="border-t border-slate-200 pt-5">
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10m7 8H7a2 2 0 01-2-2V7a2 2 0 012-2h10a2 2 0 012 2v12a2 2 0 01-2 2z" />
+              </svg>
+              Escala de Trabalho
+            </h3>
+            <select
+              value={formData.scheduleId}
+              onChange={(e) => setFormData({ ...formData, scheduleId: e.target.value })}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
+            >
+              <option value="">Sem escala atribuída</option>
+              {schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {schedule.name} ({({ FIXED: 'Fixo', ROTATING: 'Rotativo', FLEXIBLE: 'Flexível' } as any)[schedule.type] || schedule.type})
+                </option>
+              ))}
+            </select>
+            {!formData.branchId && (
+              <p className="text-xs text-amber-600 mt-1">Selecione uma filial primeiro para ver as escalas disponíveis.</p>
+            )}
+
+            {/* Schedule Preview */}
+            {formData.scheduleId && selectedScheduleEntries.length > 0 && (
+              <div className="mt-3 border border-indigo-100 rounded-xl overflow-hidden bg-indigo-50/30">
+                <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
+                  <span className="text-sm font-semibold text-indigo-700">
+                    Horários da Escala Selecionada
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-indigo-100">
+                        <th className="px-3 py-2 text-left font-medium text-slate-600">Dia</th>
+                        <th className="px-3 py-2 text-center font-medium text-slate-600">Entrada</th>
+                        <th className="px-3 py-2 text-center font-medium text-slate-600">Saída</th>
+                        <th className="px-3 py-2 text-center font-medium text-slate-600">Intervalo</th>
+                        <th className="px-3 py-2 text-center font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[0, 1, 2, 3, 4, 5, 6].map((day) => {
+                        const entry = selectedScheduleEntries.find((e) => e.dayOfWeek === day);
+                        const isWork = entry?.isWorkDay !== false && entry?.startTime;
+                        return (
+                          <tr key={day} className={`border-b border-indigo-50 last:border-0 ${!isWork ? 'bg-slate-50/50' : ''}`}>
+                            <td className="px-3 py-2 font-medium text-slate-700">{DAY_NAMES[day]}</td>
+                            <td className="px-3 py-2 text-center text-slate-600">{isWork ? entry.startTime : '-'}</td>
+                            <td className="px-3 py-2 text-center text-slate-600">{isWork ? entry.endTime : '-'}</td>
+                            <td className="px-3 py-2 text-center text-slate-600">
+                              {isWork && entry.breakStartTime ? `${entry.breakStartTime} - ${entry.breakEndTime}` : '-'}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                isWork ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                              }`}>
+                                {isWork ? 'Trabalha' : 'Folga'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4 border-t border-slate-200">
@@ -433,7 +549,6 @@ export default function EmployeesPage() {
               Tem certeza que deseja deletar este colaborador? Esta ação não pode ser desfeita.
             </p>
           </div>
-
           <div className="flex gap-3">
             <button
               onClick={() => setShowDeleteConfirm(null)}

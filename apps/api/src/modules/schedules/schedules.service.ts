@@ -73,17 +73,20 @@ export class SchedulesService {
   async update(id: string, dto: any) {
     await this.findOne(id);
 
+    const { scheduleEntries, ...rest } = dto;
+
     return this.prisma.workSchedule.update({
       where: { id },
       data: {
-        ...dto,
-        scheduleEntries: dto.scheduleEntries ? {
+        ...rest,
+        scheduleEntries: scheduleEntries && scheduleEntries.length > 0 ? {
           deleteMany: {},
-          create: dto.scheduleEntries,
+          create: scheduleEntries,
         } : undefined,
       },
       include: {
         scheduleEntries: true,
+        branch: { select: { id: true, name: true } },
       },
     });
   }
