@@ -15,6 +15,7 @@ import { PunchesModule } from './modules/punches/punches.module';
 import { TimesheetsModule } from './modules/timesheets/timesheets.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SeedModule } from './modules/seed/seed.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     TimesheetsModule,
     SyncModule,
     ReportsModule,
+    SeedModule,
   ],
 })
 export class AppModule {}
