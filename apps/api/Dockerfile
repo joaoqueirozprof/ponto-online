@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-ARG CACHEBUST=34
+ARG CACHEBUST=35
 
 WORKDIR /app
 
@@ -31,5 +31,5 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 34
+# CACHEBUST 35
 CMD ["./entrypoint.sh"]
