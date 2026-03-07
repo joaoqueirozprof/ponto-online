@@ -141,7 +141,8 @@ export default function PunchesPage() {
     }
     setSubmittingManual(true);
     try {
-      const punchTime = `${manualForm.date}T${manualForm.time}:00.000Z`;
+      // Create date from local time inputs - new Date() interprets as local timezone
+      const punchTime = new Date(`${manualForm.date}T${manualForm.time}:00`).toISOString();
       await apiClient.post('/punches/manual', {
         employeeId: manualForm.employeeId,
         punchTime,
@@ -602,8 +603,8 @@ export default function PunchesPage() {
 
       {/* Manual Punch Modal */}
       {showManualModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowManualModal(false)} onKeyDown={(e) => { if (e.key === 'Escape') setShowManualModal(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center justify-between">
                 <div>
@@ -661,10 +662,10 @@ export default function PunchesPage() {
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Tipo de Registro *</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { value: 'ENTRY', label: 'Entrada', icon: '→', color: 'emerald' },
-                    { value: 'EXIT', label: 'Saída', icon: '←', color: 'red' },
-                    { value: 'BREAK_START', label: 'Início Intervalo', icon: '⏸', color: 'amber' },
-                    { value: 'BREAK_END', label: 'Fim Intervalo', icon: '▶', color: 'blue' },
+                    { value: 'ENTRY', label: 'Entrada', icon: '→', activeClass: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
+                    { value: 'EXIT', label: 'Saída', icon: '←', activeClass: 'border-red-500 bg-red-50 text-red-700' },
+                    { value: 'BREAK_START', label: 'Início Intervalo', icon: '⏸', activeClass: 'border-amber-500 bg-amber-50 text-amber-700' },
+                    { value: 'BREAK_END', label: 'Fim Intervalo', icon: '▶', activeClass: 'border-blue-500 bg-blue-50 text-blue-700' },
                   ].map((type) => (
                     <button
                       key={type.value}
@@ -672,8 +673,8 @@ export default function PunchesPage() {
                       onClick={() => setManualForm({ ...manualForm, punchType: type.value })}
                       className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border-2 text-sm font-medium transition-all ${
                         manualForm.punchType === type.value
-                          ? `border-${type.color}-500 bg-${type.color}-50 text-${type.color}-700 dark:bg-${type.color}-900/30 dark:text-${type.color}-300`
-                          : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                          ? type.activeClass
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                       }`}
                     >
                       <span>{type.icon}</span>
