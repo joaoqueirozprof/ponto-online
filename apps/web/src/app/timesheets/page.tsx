@@ -4,15 +4,29 @@ import DataTable from '@/components/DataTable';
 import { apiClient } from '@/lib/api';
 import { useEffect, useState } from 'react';
 
+interface TimesheetEmployee {
+  id: string;
+  name: string;
+  cpf: string;
+  branch: {
+    id: string;
+    name: string;
+  };
+}
+
 interface Timesheet {
   id: string;
-  employeeName: string;
+  employeeId: string;
   month: number;
   year: number;
-  status: 'OPEN' | 'CALCULATED' | 'APPROVED';
-  workedHours: number;
-  overtime: number;
-  employeeId: string;
+  status: 'OPEN' | 'CALCULATED' | 'CLOSED' | 'APPROVED';
+  totalWorkedMinutes: number;
+  totalOvertimeMinutes: number;
+  totalNightMinutes: number;
+  totalAbsenceMinutes: number;
+  totalLateMinutes: number;
+  totalBalanceMinutes: number;
+  employee: TimesheetEmployee;
 }
 
 interface Branch {
@@ -32,6 +46,20 @@ interface ConfirmDialog {
   timesheetId: string | null;
   message: string;
 }
+
+const MONTHS_PT: Record<number, string> = {
+  1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun',
+  7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez',
+};
+
+const formatHHMM = (minutes: number): string => {
+  if (!minutes || minutes === 0) return '00:00';
+  const sign = minutes < 0 ? '-' : '';
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = Math.round(abs % 60);
+  return `${sign}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
 
 export default function TimesheetsPage() {
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
@@ -55,17 +83,9 @@ export default function TimesheetsPage() {
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     const id = Date.now().toString();
-    const newToast: Toast = {
-      id,
-      message,
-      type,
-      visible: true,
-    };
+    const newToast: Toast = { id, message, type, visible: true };
     setToasts((prev) => [...prev, newToast]);
-
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
   };
 
   const fetchTimesheets = async () => {
@@ -115,7 +135,6 @@ export default function TimesheetsPage() {
 
   const handleConfirmApprove = async () => {
     if (!confirmDialog.timesheetId) return;
-
     try {
       await apiClient.patch(`/timesheets/${confirmDialog.timesheetId}`, { status: 'APPROVED' });
       showToast('Folha de ponto aprovada com sucesso', 'success');
@@ -133,25 +152,12 @@ export default function TimesheetsPage() {
 
   const getStatusBadge = (status: string) => {
     const badgeConfig: Record<string, { bg: string; text: string; label: string }> = {
-      OPEN: {
-        bg: 'bg-slate-100 dark:bg-slate-800',
-        text: 'text-slate-700 dark:text-slate-300',
-        label: 'Aberta',
-      },
-      CALCULATED: {
-        bg: 'bg-amber-100 dark:bg-amber-900',
-        text: 'text-amber-700 dark:text-amber-300',
-        label: 'Calculada',
-      },
-      APPROVED: {
-        bg: 'bg-emerald-100 dark:bg-emerald-900',
-        text: 'text-emerald-700 dark:text-emerald-300',
-        label: 'Aprovada',
-      },
+      OPEN: { bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-700 dark:text-slate-300', label: 'Aberta' },
+      CALCULATED: { bg: 'bg-amber-100 dark:bg-amber-900', text: 'text-amber-700 dark:text-amber-300', label: 'Calculada' },
+      CLOSED: { bg: 'bg-blue-100 dark:bg-blue-900', text: 'text-blue-700 dark:text-blue-300', label: 'Fechada' },
+      APPROVED: { bg: 'bg-emerald-100 dark:bg-emerald-900', text: 'text-emerald-700 dark:text-emerald-300', label: 'Aprovada' },
     };
-
     const config = badgeConfig[status] || badgeConfig.OPEN;
-
     return (
       <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${config.bg} ${config.text}`}>
         {config.label}
@@ -161,55 +167,73 @@ export default function TimesheetsPage() {
 
   const columns = [
     {
-      key: 'employeeName',
+      key: 'employee',
       label: 'Colaborador',
-      render: (value: string) => (
-        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{value}</div>
+      render: (_: any, row: Timesheet) => (
+        <div>
+          <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{row.employee?.name || '-'}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{row.employee?.branch?.name || ''}</div>
+        </div>
       ),
     },
     {
       key: 'period',
       label: 'Período',
-      render: (_: any, row: Timesheet) => {
-        const monthStr = String(row.month).padStart(2, '0');
-        return (
-          <div className="text-sm text-slate-600 dark:text-slate-400">
-            {monthStr}/{row.year}
-          </div>
-        );
-      },
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      render: (status: string) => getStatusBadge(status),
-    },
-    {
-      key: 'workedHours',
-      label: 'Horas Trabalhadas',
-      render: (hours: number) => (
-        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-          {hours.toFixed(2)}h
+      render: (_: any, row: Timesheet) => (
+        <div className="text-sm text-slate-600 dark:text-slate-400 font-mono">
+          {MONTHS_PT[row.month] || String(row.month).padStart(2, '0')}/{row.year}
         </div>
       ),
     },
     {
-      key: 'overtime',
-      label: 'Horas Extras',
-      render: (overtime: number) => (
-        <div className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-          {overtime.toFixed(2)}h
+      key: 'status',
+      label: 'Status',
+      render: (_: any, row: Timesheet) => getStatusBadge(row.status),
+    },
+    {
+      key: 'totalWorkedMinutes',
+      label: 'Trabalhadas',
+      render: (_: any, row: Timesheet) => (
+        <div className="text-sm font-medium text-slate-700 dark:text-slate-300 font-mono">
+          {formatHHMM(row.totalWorkedMinutes)}
+        </div>
+      ),
+    },
+    {
+      key: 'totalOvertimeMinutes',
+      label: 'Extras',
+      render: (_: any, row: Timesheet) => (
+        <div className="text-sm font-medium text-emerald-600 dark:text-emerald-400 font-mono">
+          {formatHHMM(row.totalOvertimeMinutes)}
+        </div>
+      ),
+    },
+    {
+      key: 'totalLateMinutes',
+      label: 'Atraso',
+      render: (_: any, row: Timesheet) => (
+        <div className={`text-sm font-medium font-mono ${row.totalLateMinutes > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'}`}>
+          {formatHHMM(row.totalLateMinutes)}
+        </div>
+      ),
+    },
+    {
+      key: 'totalBalanceMinutes',
+      label: 'Saldo',
+      render: (_: any, row: Timesheet) => (
+        <div className={`text-sm font-bold font-mono ${row.totalBalanceMinutes >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+          {formatHHMM(row.totalBalanceMinutes)}
         </div>
       ),
     },
     {
       key: 'id',
       label: 'Ações',
-      render: (id: string, row: Timesheet) => (
+      render: (_: any, row: Timesheet) => (
         <div className="flex items-center gap-2">
           <select
             value={row.status}
-            onChange={(e) => handleStatusChange(id, e.target.value)}
+            onChange={(e) => handleStatusChange(row.id, e.target.value)}
             className="px-2.5 py-1.5 text-xs font-medium border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 dark:focus:ring-offset-slate-900 transition-colors hover:border-slate-400 dark:hover:border-slate-500"
           >
             <option value="OPEN">Aberta</option>
@@ -218,7 +242,7 @@ export default function TimesheetsPage() {
           </select>
           {row.status !== 'APPROVED' && (
             <button
-              onClick={() => openConfirmDialog(id)}
+              onClick={() => openConfirmDialog(row.id)}
               className="px-2.5 py-1.5 text-xs font-medium bg-emerald-600 dark:bg-emerald-700 text-white rounded-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900"
             >
               Aprovar
@@ -251,17 +275,12 @@ export default function TimesheetsPage() {
             <select
               id="branch-filter"
               value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => { setFilterBranch(e.target.value); setCurrentPage(1); }}
               className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 dark:focus:ring-offset-slate-800 transition-colors"
             >
               <option value="">Todas as filiais</option>
               {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
+                <option key={branch.id} value={branch.id}>{branch.name}</option>
               ))}
             </select>
           </div>
@@ -286,23 +305,13 @@ export default function TimesheetsPage() {
       {confirmDialog.isOpen && (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-6 max-w-sm mx-4 border border-slate-200 dark:border-slate-700">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
-              Confirmar Aprovação
-            </h2>
-            <p className="text-slate-600 dark:text-slate-400 text-sm mb-6">
-              {confirmDialog.message}
-            </p>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Confirmar Aprovação</h2>
+            <p className="text-slate-600 dark:text-slate-400 text-sm mb-6">{confirmDialog.message}</p>
             <div className="flex gap-3 justify-end">
-              <button
-                onClick={handleCancelApprove}
-                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-600"
-              >
+              <button onClick={handleCancelApprove} className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                 Cancelar
               </button>
-              <button
-                onClick={handleConfirmApprove}
-                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 rounded-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
+              <button onClick={handleConfirmApprove} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 rounded-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 transition-colors">
                 Aprovar
               </button>
             </div>
@@ -313,14 +322,9 @@ export default function TimesheetsPage() {
       {/* Toast Notifications */}
       <div className="fixed top-4 right-4 z-40 space-y-2 max-w-sm">
         {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 ${
-              toast.type === 'success'
-                ? 'bg-emerald-500 text-white dark:bg-emerald-600'
-                : 'bg-red-500 text-white dark:bg-red-600'
-            } ${toast.visible ? 'opacity-100' : 'opacity-0'}`}
-          >
+          <div key={toast.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 ${
+            toast.type === 'success' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
+          } ${toast.visible ? 'opacity-100' : 'opacity-0'}`}>
             {toast.message}
           </div>
         ))}
