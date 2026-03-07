@@ -101,14 +101,12 @@ export class PunchesService {
   }
 
   async createManualPunch(dto: { employeeId: string; punchTime: string; punchType: string; reason: string; createdBy: string }) {
-    // Create raw punch event first (source = MANUAL, deviceId not required for manual)
     // We need a device to satisfy the relation - use a virtual/manual device
-    let manualDevice = await this.prisma.device.findFirst({
+    let manualDevice: any = await this.prisma.device.findFirst({
       where: { serialNumber: 'MANUAL-ENTRY' },
     });
 
     if (!manualDevice) {
-      // Get the first branch to associate the manual device
       const firstBranch = await this.prisma.branch.findFirst();
       if (!firstBranch) {
         throw new NotFoundException('No branch found. Please create a branch first.');
@@ -119,8 +117,11 @@ export class PunchesService {
           serialNumber: 'MANUAL-ENTRY',
           model: 'Manual',
           branchId: firstBranch.id,
-          status: 'ONLINE',
-          location: 'Sistema',
+          ipAddress: '0.0.0.0',
+          port: 0,
+          login: 'system',
+          encryptedPassword: 'none',
+          isActive: false,
         },
       });
     }
@@ -143,7 +144,7 @@ export class PunchesService {
         employeeId: dto.employeeId,
         punchTime,
         punchType: dto.punchType as any,
-        status: 'MANUAL',
+        status: 'MANUAL' as any,
         originalTime: punchTime,
         adjustedBy: dto.createdBy,
         adjustmentReason: dto.reason,
