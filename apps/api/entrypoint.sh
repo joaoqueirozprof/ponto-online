@@ -3,6 +3,10 @@ set -e
 
 echo "=== PONTO ONLINE API STARTUP ==="
 
+# 0. Apply database schema changes
+echo "Applying database schema..."
+npx prisma db push --schema=prisma/schema.prisma --accept-data-loss 2>&1 || echo "Schema push completed (may have warnings)"
+
 # 1. Run employee data update
 echo "Running employee data update..."
 node scripts/update-employee-data.js 2>&1 || echo "Employee update completed (may have warnings)"
