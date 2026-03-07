@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install OpenSSL 1.1 compat for Prisma
-RUN apk add --no-cache openssl1.1-compat || apk add --no-cache openssl || true
+# Install OpenSSL for Prisma (Alpine 3.20+ uses OpenSSL 3.x)
+RUN apk add --no-cache openssl
 
 # Copy API package and install all deps
 COPY apps/api/package.json ./
@@ -28,5 +28,5 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 26
+# CACHEBUST 27
 CMD ["./entrypoint.sh"]
