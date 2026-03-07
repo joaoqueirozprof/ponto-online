@@ -6,18 +6,17 @@ export class SchedulesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: any) {
+    const { scheduleEntries, ...rest } = dto;
     return this.prisma.workSchedule.create({
       data: {
-        ...dto,
-        scheduleEntries: {
-          create: dto.scheduleEntries || [],
-        },
+        ...rest,
+        scheduleEntries: scheduleEntries && scheduleEntries.length > 0
+          ? { create: scheduleEntries }
+          : undefined,
       },
       include: {
         scheduleEntries: true,
-        employees: {
-          select: { id: true, name: true },
-        },
+        branch: { select: { id: true, name: true } },
       },
     });
   }

@@ -1,6 +1,7 @@
 'use client';
 
 import DataTable from '@/components/DataTable';
+import Modal from '@/components/Modal';
 import { apiClient } from '@/lib/api';
 import { useEffect, useState } from 'react';
 
@@ -22,6 +23,13 @@ interface Branch {
   name: string;
 }
 
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'error';
+  timestamp: number;
+}
+
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -30,8 +38,11 @@ export default function DevicesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const pageSize = 10;
   const [filterBranch, setFilterBranch] = useState('');
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: '',
     model: '',
@@ -48,6 +59,14 @@ export default function DevicesPage() {
     fetchBranches();
   }, [currentPage, filterBranch]);
 
+  const addToast = (message: string, type: 'success' | 'error') => {
+    const id = String(Date.now());
+    setToasts((prev) => [...prev, { id, message, type, timestamp: Date.now() }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
   const fetchDevices = async () => {
     try {
       setLoading(true);
@@ -58,7 +77,7 @@ export default function DevicesPage() {
       setDevices(response.data.data || []);
       setTotalCount(response.data.total || 0);
     } catch (error) {
-      alert('Erro ao carregar dispositivos');
+      addToast('Erro ao carregar dispositivos', 'error');
       console.error(error);
     } finally {
       setLoading(false);
@@ -74,8 +93,28 @@ export default function DevicesPage() {
     }
   };
 
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.name.trim()) errors.name = 'Nome é obrigatório';
+    if (!formData.model.trim()) errors.model = 'Modelo é obrigatório';
+    if (!formData.serialNumber.trim()) errors.serialNumber = 'Número de série é obrigatório';
+    if (!formData.ipAddress.trim()) errors.ipAddress = 'Endereço IP é obrigatório';
+    if (!formData.port) errors.port = 'Porta é obrigatória';
+    if (!formData.branchId) errors.branchId = 'Filial é obrigatória';
+
+    if (!editingId) {
+      if (!formData.login.trim()) errors.login = 'Login é obrigatório para novo dispositivo';
+      if (!formData.encryptedPassword.trim()) errors.encryptedPassword = 'Senha é obrigatória para novo dispositivo';
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleAddClick = () => {
     setEditingId(null);
+    setFormErrors({});
     setFormData({
       name: '',
       model: '',
@@ -91,6 +130,7 @@ export default function DevicesPage() {
 
   const handleEditClick = (device: Device) => {
     setEditingId(device.id);
+    setFormErrors({});
     setFormData({
       name: device.name,
       model: device.model,
@@ -106,42 +146,54 @@ export default function DevicesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validateForm()) {
+      addToast('Por favor, corrija os erros do formulário', 'error');
+      return;
+    }
+
     try {
-      const data = {
-        name: formData.name,
-        model: formData.model,
-        serialNumber: formData.serialNumber,
-        ipAddress: formData.ipAddress,
+      const data: any = {
+        name: formData.name.trim(),
+        model: formData.model.trim(),
+        serialNumber: formData.serialNumber.trim(),
+        ipAddress: formData.ipAddress.trim(),
         port: parseInt(formData.port),
         branchId: formData.branchId,
-        ...(formData.login && { login: formData.login }),
-        ...(formData.encryptedPassword && { encryptedPassword: formData.encryptedPassword }),
       };
+
+      if (formData.login.trim()) {
+        data.login = formData.login.trim();
+      }
+      if (formData.encryptedPassword.trim()) {
+        data.encryptedPassword = formData.encryptedPassword.trim();
+      }
 
       if (editingId) {
         await apiClient.put(`/devices/${editingId}`, data);
-        alert('Dispositivo atualizado com sucesso');
+        addToast('Dispositivo atualizado com sucesso', 'success');
       } else {
         await apiClient.post('/devices', data);
-        alert('Dispositivo criado com sucesso');
+        addToast('Dispositivo criado com sucesso', 'success');
       }
       setShowModal(false);
       setCurrentPage(1);
+      setFormErrors({});
       fetchDevices();
     } catch (error) {
-      alert('Erro ao salvar dispositivo');
+      addToast('Erro ao salvar dispositivo', 'error');
       console.error(error);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Tem certeza que deseja deletar este dispositivo?')) return;
     try {
       await apiClient.delete(`/devices/${id}`);
-      alert('Dispositivo deletado com sucesso');
+      addToast('Dispositivo deletado com sucesso', 'success');
+      setDeleteConfirmId(null);
       fetchDevices();
     } catch (error) {
-      alert('Erro ao deletar dispositivo');
+      addToast('Erro ao deletar dispositivo', 'error');
       console.error(error);
     }
   };
@@ -182,12 +234,17 @@ export default function DevicesPage() {
       label: 'Status',
       render: (status: string) => (
         <span
-          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold gap-1 ${
             status === 'online'
-              ? 'bg-emerald-50 text-emerald-700'
-              : 'bg-red-50 text-red-700'
+              ? 'bg-emerald-100 text-emerald-700'
+              : 'bg-slate-100 text-slate-600'
           }`}
         >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              status === 'online' ? 'bg-emerald-500' : 'bg-slate-400'
+            }`}
+          />
           {status === 'online' ? 'Online' : 'Offline'}
         </span>
       ),
@@ -207,16 +264,16 @@ export default function DevicesPage() {
               e.stopPropagation();
               handleEditClick(row);
             }}
-            className="px-3 py-1 text-sm bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+            className="px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors"
           >
             Editar
           </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleDelete(id);
+              setDeleteConfirmId(id);
             }}
-            className="px-3 py-1 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+            className="px-3 py-1 text-sm font-medium bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
           >
             Deletar
           </button>
@@ -230,23 +287,23 @@ export default function DevicesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Dispositivos</h1>
-          <p className="text-slate-500 mt-1">Gerencie todos os dispositivos de ponto do sistema</p>
+          <h1 className="text-3xl font-bold text-slate-900">Dispositivos</h1>
+          <p className="text-slate-500 mt-2">Gerencie todos os dispositivos de ponto do sistema</p>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      {/* Filters and Actions */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         <div className="flex gap-4 items-end">
           <div className="flex-1">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Filtrar por Filial</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Filtrar por Filial</label>
             <select
               value={filterBranch}
               onChange={(e) => {
                 setFilterBranch(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-900 bg-white transition-all"
             >
               <option value="">Todas as filiais</option>
               {branches.map((branch) => (
@@ -258,12 +315,12 @@ export default function DevicesPage() {
           </div>
           <button
             onClick={handleAddClick}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium text-sm"
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:bg-indigo-800 transition-all font-semibold text-sm shadow-sm hover:shadow-md"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Adicionar
+            Adicionar Dispositivo
           </button>
         </div>
       </div>
@@ -280,127 +337,257 @@ export default function DevicesPage() {
         onNextPage={() => setCurrentPage((p) => p + 1)}
       />
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
-            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">
-                {editingId ? 'Editar Dispositivo' : 'Novo Dispositivo'}
-              </h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-96 overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nome*</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Modelo*</label>
-                <input
-                  type="text"
-                  value={formData.model}
-                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Número de Série*</label>
-                <input
-                  type="text"
-                  value={formData.serialNumber}
-                  onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Endereço IP*</label>
-                <input
-                  type="text"
-                  value={formData.ipAddress}
-                  onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Porta*</label>
-                <input
-                  type="number"
-                  value={formData.port}
-                  onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Login</label>
-                <input
-                  type="text"
-                  value={formData.login}
-                  onChange={(e) => setFormData({ ...formData, login: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Senha Encriptada</label>
-                <input
-                  type="password"
-                  value={formData.encryptedPassword}
-                  onChange={(e) => setFormData({ ...formData, encryptedPassword: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Filial*</label>
-                <select
-                  value={formData.branchId}
-                  onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                >
-                  <option value="">Selecione uma filial</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors"
-                >
-                  Salvar
-                </button>
-              </div>
-            </form>
+      {/* Modal for Add/Edit */}
+      <Modal
+        isOpen={showModal}
+        onClose={() => {
+          setShowModal(false);
+          setFormErrors({});
+        }}
+        title={editingId ? 'Editar Dispositivo' : 'Novo Dispositivo'}
+        size="md"
+      >
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Nome <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.name
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: Terminal Biométrico 01"
+            />
+            {formErrors.name && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.name}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Modelo <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.model}
+              onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.model
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: TZ100"
+            />
+            {formErrors.model && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.model}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Número de Série <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.serialNumber}
+              onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.serialNumber
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: SN123456789"
+            />
+            {formErrors.serialNumber && (
+              <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.serialNumber}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Endereço IP <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.ipAddress}
+              onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.ipAddress
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: 192.168.1.100"
+            />
+            {formErrors.ipAddress && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.ipAddress}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Porta <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="65535"
+              value={formData.port}
+              onChange={(e) => setFormData({ ...formData, port: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.port
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: 5000"
+            />
+            {formErrors.port && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.port}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Login <span className="text-red-500">{!editingId ? '*' : ''}</span>
+            </label>
+            <input
+              type="text"
+              value={formData.login}
+              onChange={(e) => setFormData({ ...formData, login: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.login
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="Ex: admin"
+            />
+            {formErrors.login && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.login}</p>}
+            {!editingId && <p className="text-slate-500 text-xs mt-1">Obrigatório para novo dispositivo</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Senha <span className="text-red-500">{!editingId ? '*' : ''}</span>
+            </label>
+            <input
+              type="password"
+              value={formData.encryptedPassword}
+              onChange={(e) => setFormData({ ...formData, encryptedPassword: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.encryptedPassword
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+              placeholder="••••••••"
+            />
+            {formErrors.encryptedPassword && (
+              <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.encryptedPassword}</p>
+            )}
+            {!editingId && <p className="text-slate-500 text-xs mt-1">Obrigatória para novo dispositivo</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-1.5">
+              Filial <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.branchId}
+              onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 transition-all ${
+                formErrors.branchId
+                  ? 'border-red-300 focus:ring-red-500 focus:border-transparent'
+                  : 'border-slate-300 focus:ring-indigo-500 focus:border-transparent'
+              } bg-white text-slate-900`}
+            >
+              <option value="">Selecione uma filial</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+            {formErrors.branchId && <p className="text-red-500 text-xs mt-1 font-medium">{formErrors.branchId}</p>}
+          </div>
+
+          <div className="flex gap-3 pt-5 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={() => {
+                setShowModal(false);
+                setFormErrors({});
+              }}
+              className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 active:bg-slate-100 font-semibold transition-all"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:bg-indigo-800 font-semibold transition-all shadow-sm hover:shadow-md"
+            >
+              {editingId ? 'Atualizar' : 'Criar Dispositivo'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        title="Confirmar Exclusão"
+        size="sm"
+      >
+        <div className="space-y-5">
+          <p className="text-slate-700">
+            Tem certeza que deseja deletar este dispositivo? Esta ação não pode ser desfeita.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setDeleteConfirmId(null)}
+              className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 active:bg-slate-100 font-semibold transition-all"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => deleteConfirmId && handleDelete(deleteConfirmId)}
+              className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800 font-semibold transition-all shadow-sm hover:shadow-md"
+            >
+              Deletar
+            </button>
           </div>
         </div>
-      )}
+      </Modal>
+
+      {/* Toast Notifications */}
+      <div className="fixed bottom-6 right-6 z-50 space-y-3 max-w-md">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-right-4 duration-200 ${
+              toast.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : 'bg-red-50 text-red-800 border border-red-200'
+            }`}
+          >
+            <div className="flex-shrink-0">
+              {toast.type === 'success' ? (
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+            </div>
+            <p className="flex-1">{toast.message}</p>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
