@@ -23,6 +23,13 @@ interface RecentPunch {
   device: { id: string; name: string } | null;
 }
 
+interface WeekDay {
+  label: string;
+  date: string;
+  count: number;
+  isToday: boolean;
+}
+
 export default function DashboardPage() {
   const { user, isAuthenticated, loading } = useAuth();
   const router = useRouter();
@@ -32,6 +39,7 @@ export default function DashboardPage() {
   });
   const [statsLoading, setStatsLoading] = useState(true);
   const [recentPunches, setRecentPunches] = useState<RecentPunch[]>([]);
+  const [weekData, setWeekData] = useState<WeekDay[]>([]);
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -48,6 +56,7 @@ export default function DashboardPage() {
     if (isAuthenticated) {
       fetchStats();
       fetchRecentPunches();
+      fetchWeekData();
     }
   }, [isAuthenticated]);
 
@@ -94,6 +103,42 @@ export default function DashboardPage() {
       setRecentPunches(response.data.data || []);
     } catch (error) {
       console.error('Erro ao carregar batidas recentes', error);
+    }
+  };
+
+  const fetchWeekData = async () => {
+    try {
+      const today = new Date();
+      const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      const days: WeekDay[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        days.push({
+          label: dayNames[d.getDay()],
+          date: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`,
+          count: 0,
+          isToday: i === 0,
+        });
+      }
+      // Fetch last 7 days of punches
+      const startD = new Date(today);
+      startD.setDate(startD.getDate() - 6);
+      const startStr = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, '0')}-${String(startD.getDate()).padStart(2, '0')}`;
+      const endStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const res = await apiClient.get('/punches/raw', { params: { take: 2000, startDate: startStr, endDate: endStr } }).catch(() => ({ data: { data: [] } }));
+      const punches = res.data.data || [];
+      punches.forEach((p: any) => {
+        if (!p.punchTime) return;
+        const pDate = new Date(p.punchTime);
+        const pStr = `${String(pDate.getDate()).padStart(2, '0')}/${String(pDate.getMonth() + 1).padStart(2, '0')}`;
+        const day = days.find((d) => d.date === pStr);
+        if (day) day.count++;
+      });
+      setWeekData(days);
+    } catch (err) {
+      console.error('Erro ao carregar dados da semana', err);
     }
   };
 
@@ -228,6 +273,34 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {/* Weekly Chart */}
+      {weekData.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4">Registros dos Últimos 7 Dias</h2>
+          <div className="flex items-end justify-between gap-2" style={{ height: '160px' }}>
+            {weekData.map((day, i) => {
+              const maxCount = Math.max(...weekData.map((d) => d.count), 1);
+              const heightPct = Math.max((day.count / maxCount) * 100, 4);
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                  <div className="text-xs font-semibold text-slate-600 mb-1">{day.count || ''}</div>
+                  <div
+                    className={`w-full max-w-[40px] rounded-t-md transition-all duration-500 ${day.isToday ? 'bg-indigo-500' : 'bg-indigo-200'}`}
+                    style={{ height: `${heightPct}%` }}
+                  />
+                  <div className={`text-xs mt-2 ${day.isToday ? 'font-bold text-indigo-600' : 'text-slate-400'}`}>
+                    {day.label}
+                  </div>
+                  <div className={`text-[10px] ${day.isToday ? 'text-indigo-500' : 'text-slate-300'}`}>
+                    {day.date}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -49,6 +49,13 @@ const PUNCH_STATUS_PT: Record<string, string> = {
   DELETED: 'Excluído',
 };
 
+interface PunchSummary {
+  totalToday: number;
+  uniqueEmployees: number;
+  entriesCount: number;
+  exitsCount: number;
+}
+
 export default function PunchesPage() {
   const [activeTab, setActiveTab] = useState<'raw' | 'normalized' | 'adjustments'>('raw');
   const [rawPunches, setRawPunches] = useState<RawPunch[]>([]);
@@ -65,10 +72,36 @@ export default function PunchesPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [summary, setSummary] = useState<PunchSummary>({ totalToday: 0, uniqueEmployees: 0, entriesCount: 0, exitsCount: 0 });
 
   useEffect(() => {
     fetchEmployees();
+    fetchSummary();
   }, []);
+
+  const fetchSummary = async () => {
+    try {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const [rawRes, normRes] = await Promise.all([
+        apiClient.get('/punches/raw', { params: { take: 500, startDate: todayStr, endDate: todayStr } }).catch(() => ({ data: { data: [], total: 0 } })),
+        apiClient.get('/punches/normalized', { params: { take: 500, startDate: todayStr, endDate: todayStr } }).catch(() => ({ data: { data: [] } })),
+      ]);
+      const rawData = rawRes.data.data || [];
+      const normData = normRes.data.data || [];
+      const uniqueEmps = new Set(rawData.map((p: any) => p.employee?.id).filter(Boolean));
+      const entries = normData.filter((p: any) => p.punchType === 'ENTRY').length;
+      const exits = normData.filter((p: any) => p.punchType === 'EXIT').length;
+      setSummary({
+        totalToday: rawRes.data.total || rawData.length,
+        uniqueEmployees: uniqueEmps.size,
+        entriesCount: entries,
+        exitsCount: exits,
+      });
+    } catch (err) {
+      console.error('Erro ao carregar resumo', err);
+    }
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -351,6 +384,21 @@ export default function PunchesPage() {
         <div className="space-y-2">
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Registros de Ponto</h1>
           <p className="text-base text-slate-600 dark:text-slate-400">Visualize e gerencie todos os registros de ponto</p>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: 'Registros Hoje', value: summary.totalToday, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+            { label: 'Colaboradores Presentes', value: summary.uniqueEmployees, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+            { label: 'Entradas', value: summary.entriesCount, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+            { label: 'Saídas', value: summary.exitsCount, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+          ].map((card) => (
+            <div key={card.label} className={`${card.bg} ${card.border} border rounded-xl p-4 text-center`}>
+              <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
+              <div className="text-xs text-slate-500 mt-1">{card.label}</div>
+            </div>
+          ))}
         </div>
 
         {/* Tab Navigation */}
