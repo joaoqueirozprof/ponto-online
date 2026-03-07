@@ -2,15 +2,117 @@
 
 import { apiClient } from '@/lib/api';
 import { useEffect, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 
-interface ReportData {
-  [key: string]: any;
-}
-
+// Interfaces
 interface Employee {
   id: string;
   name: string;
+  department: string;
+  position: string;
+  cpf: string;
+  pis: string;
+  branch: {
+    id: string;
+    name: string;
+  };
+  schedule: {
+    name: string;
+    type: string;
+  };
+}
+
+interface TimesheetDay {
+  date: string;
+  workedMinutes: number;
+  overtimeMinutes: number;
+  nightMinutes: number;
+  lateMinutes: number;
+  absenceMinutes: number;
+  breakMinutes: number;
+  punchCount: number;
+  status: 'NORMAL' | 'WEEKEND' | 'HOLIDAY' | 'ABSENCE' | 'INCOMPLETE';
+  notes: string | null;
+}
+
+interface EmployeeReportData {
+  employee: Employee;
+  timesheet: {
+    id: string;
+    month: number;
+    year: number;
+    status: string;
+    totalWorkedMinutes: number;
+    totalOvertimeMinutes: number;
+    totalNightMinutes: number;
+    totalAbsenceMinutes: number;
+    totalLateMinutes: number;
+    totalBalanceMinutes: number;
+    timesheetDays: TimesheetDay[];
+  };
+  recentPunches: Array<{
+    punchTime: string;
+    punchType: string;
+    status: string;
+  }>;
+}
+
+interface BranchTimesheetItem {
+  employeeId: string;
+  month: number;
+  year: number;
+  status: string;
+  totalWorkedMinutes: number;
+  totalOvertimeMinutes: number;
+  totalNightMinutes: number;
+  totalAbsenceMinutes: number;
+  totalLateMinutes: number;
+  totalBalanceMinutes: number;
+  employee: {
+    id: string;
+    name: string;
+    cpf: string;
+  };
+}
+
+interface BranchReportData {
+  branch: string;
+  month: number;
+  year: number;
+  summary: {
+    totalEmployees: number;
+    processedTimesheets: number;
+    approvedTimesheets: number;
+    averageWorkedHours: number;
+    totalOvertimeHours: number;
+  };
+  timesheets: BranchTimesheetItem[];
+}
+
+interface PayrollItem {
+  employee: {
+    id: string;
+    name: string;
+    cpf: string;
+    pis: string;
+    position: string;
+    department: string;
+  };
+  workedMinutes: number;
+  workedHours: string;
+  overtimeMinutes: number;
+  overtimeHours: string;
+  nightMinutes: number;
+  nightHours: string;
+  lateMinutes: number;
+  absenceMinutes: number;
+}
+
+interface PayrollReportData {
+  branch: string;
+  month: number;
+  year: number;
+  totalProcessed: number;
+  payrollData: PayrollItem[];
 }
 
 interface Branch {
@@ -39,6 +141,55 @@ const MONTHS = [
   { value: '12', label: 'Dezembro' },
 ];
 
+const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+
+const formatMinutesToHours = (minutes: number): string => {
+  const hours = minutes / 60;
+  return hours.toFixed(1);
+};
+
+const formatBrazilianDate = (dateString: string): string => {
+  const date = new Date(dateString + 'T00:00:00');
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
+};
+
+const getDayName = (dateString: string): string => {
+  const date = new Date(dateString + 'T00:00:00');
+  return DAY_NAMES[date.getDay()];
+};
+
+const getStatusColor = (status: string): string => {
+  switch (status) {
+    case 'NORMAL':
+      return 'bg-slate-700';
+    case 'WEEKEND':
+      return 'bg-gray-700';
+    case 'HOLIDAY':
+      return 'bg-blue-900';
+    case 'ABSENCE':
+      return 'bg-red-900';
+    case 'INCOMPLETE':
+      return 'bg-yellow-900';
+    default:
+      return 'bg-slate-700';
+  }
+};
+
+const getStatusBadgeColor = (status: string): string => {
+  switch (status) {
+    case 'APPROVED':
+      return 'bg-green-500 text-white';
+    case 'PENDING':
+      return 'bg-yellow-500 text-white';
+    case 'REJECTED':
+      return 'bg-red-500 text-white';
+    default:
+      return 'bg-slate-500 text-white';
+  }
+};
+
 export default function ReportsPage() {
   const currentYear = new Date().getFullYear();
 
@@ -51,17 +202,17 @@ export default function ReportsPage() {
 
   // Employee report state
   const [employeeReport, setEmployeeReport] = useState({ employeeId: '', month: '', year: currentYear.toString() });
-  const [employeeData, setEmployeeData] = useState<ReportData | null>(null);
+  const [employeeData, setEmployeeData] = useState<EmployeeReportData | null>(null);
   const [employeeLoading, setEmployeeLoading] = useState(false);
 
   // Branch report state
   const [branchReport, setBranchReport] = useState({ branchId: '', month: '', year: currentYear.toString() });
-  const [branchData, setBranchData] = useState<ReportData | null>(null);
+  const [branchData, setBranchData] = useState<BranchReportData | null>(null);
   const [branchLoading, setBranchLoading] = useState(false);
 
   // Payroll report state
   const [payrollReport, setPayrollReport] = useState({ branchId: '', month: '', year: currentYear.toString() });
-  const [payrollData, setPayrollData] = useState<ReportData | null>(null);
+  const [payrollData, setPayrollData] = useState<PayrollReportData | null>(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
 
   useEffect(() => {
@@ -104,7 +255,7 @@ export default function ReportsPage() {
       const response = await apiClient.get(
         `/reports/employee/${employeeReport.employeeId}/${employeeReport.month}/${employeeReport.year}`
       );
-      setEmployeeData(response.data.data || {});
+      setEmployeeData(response.data);
       showToast('Relatório gerado com sucesso', 'success');
     } catch (error) {
       console.error(error);
@@ -125,7 +276,7 @@ export default function ReportsPage() {
       const response = await apiClient.get(
         `/reports/branch/${branchReport.branchId}/${branchReport.month}/${branchReport.year}`
       );
-      setBranchData(response.data.data || {});
+      setBranchData(response.data);
       showToast('Relatório gerado com sucesso', 'success');
     } catch (error) {
       console.error(error);
@@ -146,7 +297,7 @@ export default function ReportsPage() {
       const response = await apiClient.get(
         `/reports/payroll/${payrollReport.branchId}/${payrollReport.month}/${payrollReport.year}`
       );
-      setPayrollData(response.data.data || {});
+      setPayrollData(response.data);
       showToast('Relatório gerado com sucesso', 'success');
     } catch (error) {
       console.error(error);
@@ -156,34 +307,40 @@ export default function ReportsPage() {
     }
   };
 
-  const MetricCard = ({ label, value, color = 'slate', icon }: { label: string; value: string | number; color?: 'green' | 'red' | 'blue' | 'slate'; icon?: React.ReactNode }) => {
+  const MetricCard = ({
+    label,
+    value,
+    color = 'slate',
+  }: {
+    label: string;
+    value: string | number;
+    color?: 'green' | 'red' | 'blue' | 'slate' | 'indigo';
+  }) => {
     const colorClasses = {
-      green: 'bg-green-50 border-green-200 text-green-700',
-      red: 'bg-red-50 border-red-200 text-red-700',
-      blue: 'bg-blue-50 border-blue-200 text-blue-700',
-      slate: 'bg-slate-50 border-slate-200 text-slate-700',
+      green: 'bg-green-500 bg-opacity-20 border-green-400 text-green-300',
+      red: 'bg-red-500 bg-opacity-20 border-red-400 text-red-300',
+      blue: 'bg-blue-500 bg-opacity-20 border-blue-400 text-blue-300',
+      indigo: 'bg-indigo-500 bg-opacity-20 border-indigo-400 text-indigo-300',
+      slate: 'bg-slate-600 bg-opacity-30 border-slate-400 text-slate-200',
     };
 
     return (
       <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
-        <p className="text-sm font-medium opacity-75">{label}</p>
-        <div className="mt-2 flex items-center justify-between">
-          <p className="text-2xl font-bold">{value}</p>
-          {icon && <span className="text-xl opacity-50">{icon}</span>}
-        </div>
+        <p className="text-xs font-medium opacity-75 uppercase tracking-wide">{label}</p>
+        <p className="mt-2 text-2xl font-bold">{value}</p>
       </div>
     );
   };
 
   const LoadingSpinner = () => (
     <div className="flex justify-center py-8">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600"></div>
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-600 border-t-indigo-500"></div>
     </div>
   );
 
   const EmptyState = ({ message }: { message: string }) => (
     <div className="flex flex-col items-center justify-center py-12">
-      <p className="text-slate-500">{message}</p>
+      <p className="text-slate-400">{message}</p>
     </div>
   );
 
@@ -236,7 +393,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Content */}
-      <div className="rounded-xl bg-slate-800 shadow-2xl border border-slate-700">
+      <div className="rounded-xl bg-slate-800 shadow-2xl border border-slate-700 overflow-hidden">
         {/* Employee Report Tab */}
         {activeTab === 'employee' && (
           <div className="p-8">
@@ -244,7 +401,9 @@ export default function ReportsPage() {
               {/* Form */}
               <div className="lg:col-span-2">
                 <h2 className="mb-6 text-2xl font-bold text-white">Espelho de Ponto</h2>
-                <p className="mb-6 text-sm text-slate-400">Consulte as horas trabalhadas, extras e banco de horas de um colaborador</p>
+                <p className="mb-6 text-sm text-slate-400">
+                  Consulte as horas trabalhadas, extras, atrasos e banco de horas de um colaborador
+                </p>
 
                 <form onSubmit={handleEmployeeReport} className="space-y-5">
                   <div>
@@ -312,43 +471,133 @@ export default function ReportsPage() {
               </div>
 
               {/* Results */}
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3 overflow-x-auto">
                 {employeeLoading ? (
                   <LoadingSpinner />
                 ) : employeeData ? (
-                  <div>
-                    <h3 className="mb-6 text-xl font-bold text-white">Resultado</h3>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-6">
+                    {/* Employee Header */}
+                    <div className="bg-slate-700 bg-opacity-50 rounded-lg p-6 border border-slate-600">
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">Colaborador</p>
+                          <p className="text-lg font-bold text-white">{employeeData.employee.name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">Cargo</p>
+                          <p className="text-lg font-bold text-white">{employeeData.employee.position}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">Departamento</p>
+                          <p className="text-sm text-slate-300">{employeeData.employee.department}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">Filial</p>
+                          <p className="text-sm text-slate-300">{employeeData.employee.branch.name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">CPF</p>
+                          <p className="text-sm text-slate-300 font-mono">{employeeData.employee.cpf}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">PIS</p>
+                          <p className="text-sm text-slate-300 font-mono">{employeeData.employee.pis}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-xs text-slate-400 uppercase tracking-wide">Horário</p>
+                          <p className="text-sm text-slate-300">
+                            {employeeData.employee.schedule.name} ({employeeData.employee.schedule.type})
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary Metrics */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                       <MetricCard
                         label="Horas Trabalhadas"
-                        value={`${employeeData.workedHours?.toFixed(2) || '0'}h`}
+                        value={`${formatMinutesToHours(employeeData.timesheet.totalWorkedMinutes)}h`}
                         color="blue"
                       />
                       <MetricCard
                         label="Horas Extras"
-                        value={`${employeeData.overtime?.toFixed(2) || '0'}h`}
+                        value={`${formatMinutesToHours(employeeData.timesheet.totalOvertimeMinutes)}h`}
                         color="green"
                       />
                       <MetricCard
+                        label="Atraso"
+                        value={`${employeeData.timesheet.totalLateMinutes}m`}
+                        color={employeeData.timesheet.totalLateMinutes > 0 ? 'red' : 'slate'}
+                      />
+                      <MetricCard
                         label="Faltas"
-                        value={employeeData.absences || '0'}
-                        color={employeeData.absences > 0 ? 'red' : 'slate'}
+                        value={`${formatMinutesToHours(employeeData.timesheet.totalAbsenceMinutes)}h`}
+                        color={employeeData.timesheet.totalAbsenceMinutes > 0 ? 'red' : 'slate'}
                       />
                       <MetricCard
                         label="Banco de Horas"
-                        value={`${employeeData.bankBalance?.toFixed(2) || '0'}h`}
-                        color={employeeData.bankBalance >= 0 ? 'green' : 'red'}
+                        value={`${formatMinutesToHours(employeeData.timesheet.totalBalanceMinutes)}h`}
+                        color={employeeData.timesheet.totalBalanceMinutes >= 0 ? 'green' : 'red'}
                       />
                       <MetricCard
-                        label="Minutos Atrasado"
-                        value={employeeData.lateMinutes || '0'}
-                        color={employeeData.lateMinutes > 0 ? 'red' : 'slate'}
+                        label="H. Noturnas"
+                        value={`${formatMinutesToHours(employeeData.timesheet.totalNightMinutes)}h`}
+                        color="indigo"
                       />
-                      <MetricCard
-                        label="Saída Antecipada (min)"
-                        value={employeeData.earlyDepartureMinutes || '0'}
-                        color={employeeData.earlyDepartureMinutes > 0 ? 'red' : 'slate'}
-                      />
+                    </div>
+
+                    {/* Daily Table */}
+                    <div>
+                      <h3 className="mb-4 text-lg font-bold text-white">Detalhamento Diário</h3>
+                      <div className="overflow-x-auto rounded-lg border border-slate-600">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700 border-b border-slate-600">
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Data</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Dia</th>
+                              <th className="px-4 py-3 text-center font-semibold text-slate-300">Registros</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Trabalhado</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Extra</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Atraso</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Falta</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {employeeData.timesheet.timesheetDays.map((day, idx) => (
+                              <tr
+                                key={idx}
+                                className={`${
+                                  idx % 2 === 0 ? 'bg-slate-750' : 'bg-slate-700'
+                                } border-b border-slate-600 hover:bg-slate-600 transition`}
+                              >
+                                <td className="px-4 py-3 font-mono text-white">{formatBrazilianDate(day.date)}</td>
+                                <td className="px-4 py-3 text-slate-300">{getDayName(day.date)}</td>
+                                <td className="px-4 py-3 text-center text-slate-300">{day.punchCount}</td>
+                                <td className="px-4 py-3 text-right text-slate-300">
+                                  {formatMinutesToHours(day.workedMinutes)}h
+                                </td>
+                                <td className="px-4 py-3 text-right text-green-400">
+                                  {formatMinutesToHours(day.overtimeMinutes)}h
+                                </td>
+                                <td className="px-4 py-3 text-right text-orange-400">{day.lateMinutes}m</td>
+                                <td className="px-4 py-3 text-right text-red-400">
+                                  {formatMinutesToHours(day.absenceMinutes)}h
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`inline-block px-3 py-1 rounded text-xs font-semibold text-white ${getStatusColor(
+                                      day.status
+                                    )}`}
+                                  >
+                                    {day.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -366,7 +615,9 @@ export default function ReportsPage() {
               {/* Form */}
               <div className="lg:col-span-2">
                 <h2 className="mb-6 text-2xl font-bold text-white">Relatório da Filial</h2>
-                <p className="mb-6 text-sm text-slate-400">Visualize resumo de colaboradores, registros e taxa de presença</p>
+                <p className="mb-6 text-sm text-slate-400">
+                  Visualize resumo de colaboradores, timesheets e horas trabalhadas por filial
+                </p>
 
                 <form onSubmit={handleBranchReport} className="space-y-5">
                   <div>
@@ -434,33 +685,90 @@ export default function ReportsPage() {
               </div>
 
               {/* Results */}
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3 overflow-x-auto">
                 {branchLoading ? (
                   <LoadingSpinner />
                 ) : branchData ? (
-                  <div>
-                    <h3 className="mb-6 text-xl font-bold text-white">Resultado</h3>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-6">
+                    {/* Summary Metrics */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                       <MetricCard
                         label="Total de Colaboradores"
-                        value={branchData.totalEmployees || '0'}
+                        value={branchData.summary.totalEmployees}
                         color="blue"
                       />
                       <MetricCard
-                        label="Total de Registros"
-                        value={branchData.totalPunches || '0'}
+                        label="Timesheets Processados"
+                        value={branchData.summary.processedTimesheets}
                         color="slate"
                       />
                       <MetricCard
+                        label="Timesheets Aprovados"
+                        value={branchData.summary.approvedTimesheets}
+                        color="green"
+                      />
+                      <MetricCard
                         label="Média de Horas"
-                        value={`${branchData.averageHours?.toFixed(2) || '0'}h`}
+                        value={`${branchData.summary.averageWorkedHours.toFixed(1)}h`}
                         color="blue"
                       />
                       <MetricCard
-                        label="Taxa de Presença"
-                        value={`${branchData.attendanceRate?.toFixed(1) || '0'}%`}
-                        color={branchData.attendanceRate >= 80 ? 'green' : 'red'}
+                        label="Total Extra"
+                        value={`${branchData.summary.totalOvertimeHours.toFixed(1)}h`}
+                        color="green"
                       />
+                    </div>
+
+                    {/* Employees Table */}
+                    <div>
+                      <h3 className="mb-4 text-lg font-bold text-white">Colaboradores</h3>
+                      <div className="overflow-x-auto rounded-lg border border-slate-600">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700 border-b border-slate-600">
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Funcionário</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">CPF</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Horas Trab.</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Horas Extra</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Atraso (min)</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Faltas (min)</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Saldo</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...branchData.timesheets]
+                              .sort((a, b) => a.employee.name.localeCompare(b.employee.name))
+                              .map((item, idx) => (
+                                <tr
+                                  key={idx}
+                                  className={`${
+                                    idx % 2 === 0 ? 'bg-slate-750' : 'bg-slate-700'
+                                  } border-b border-slate-600 hover:bg-slate-600 transition`}
+                                >
+                                  <td className="px-4 py-3 font-medium text-white">{item.employee.name}</td>
+                                  <td className="px-4 py-3 font-mono text-slate-300 text-xs">{item.employee.cpf}</td>
+                                  <td className="px-4 py-3 text-right text-slate-300">
+                                    {formatMinutesToHours(item.totalWorkedMinutes)}h
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-green-400">
+                                    {formatMinutesToHours(item.totalOvertimeMinutes)}h
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-orange-400">{item.totalLateMinutes}</td>
+                                  <td className="px-4 py-3 text-right text-red-400">{item.totalAbsenceMinutes}</td>
+                                  <td className="px-4 py-3 text-right font-semibold text-indigo-400">
+                                    {formatMinutesToHours(item.totalBalanceMinutes)}h
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`inline-block px-3 py-1 rounded text-xs font-semibold ${getStatusBadgeColor(item.status)}`}>
+                                      {item.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -478,7 +786,9 @@ export default function ReportsPage() {
               {/* Form */}
               <div className="lg:col-span-2">
                 <h2 className="mb-6 text-2xl font-bold text-white">Folha de Pagamento</h2>
-                <p className="mb-6 text-sm text-slate-400">Consulte totais de folha, extras e descontos processados</p>
+                <p className="mb-6 text-sm text-slate-400">
+                  Consulte folha de pagamento com horas trabalhadas, extras e descontos por filial
+                </p>
 
                 <form onSubmit={handlePayrollReport} className="space-y-5">
                   <div>
@@ -546,33 +856,93 @@ export default function ReportsPage() {
               </div>
 
               {/* Results */}
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3 overflow-x-auto">
                 {payrollLoading ? (
                   <LoadingSpinner />
                 ) : payrollData ? (
-                  <div>
-                    <h3 className="mb-6 text-xl font-bold text-white">Resultado</h3>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-6">
+                    {/* Summary Metric */}
+                    <div>
                       <MetricCard
-                        label="Total em Folha"
-                        value={`R$ ${payrollData.totalPayroll?.toFixed(2) || '0'}`}
-                        color="green"
-                      />
-                      <MetricCard
-                        label="Valor de Extras"
-                        value={`R$ ${payrollData.overtimeValue?.toFixed(2) || '0'}`}
-                        color="green"
-                      />
-                      <MetricCard
-                        label="Total de Descontos"
-                        value={`R$ ${payrollData.totalDiscounts?.toFixed(2) || '0'}`}
-                        color="red"
-                      />
-                      <MetricCard
-                        label="Folhas Processadas"
-                        value={payrollData.processedPayrolls || '0'}
+                        label="Total de Colaboradores Processados"
+                        value={payrollData.totalProcessed}
                         color="blue"
                       />
+                    </div>
+
+                    {/* Payroll Table */}
+                    <div>
+                      <h3 className="mb-4 text-lg font-bold text-white">Detalhamento da Folha</h3>
+                      <div className="overflow-x-auto rounded-lg border border-slate-600">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700 border-b border-slate-600">
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Funcionário</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Cargo</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">Depto</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">CPF</th>
+                              <th className="px-4 py-3 text-left font-semibold text-slate-300">PIS</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Horas Trab.</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Horas Extra</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">H. Noturnas</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Atraso (min)</th>
+                              <th className="px-4 py-3 text-right font-semibold text-slate-300">Faltas (min)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {payrollData.payrollData.map((item, idx) => (
+                              <tr
+                                key={idx}
+                                className={`${
+                                  idx % 2 === 0 ? 'bg-slate-750' : 'bg-slate-700'
+                                } border-b border-slate-600 hover:bg-slate-600 transition`}
+                              >
+                                <td className="px-4 py-3 font-medium text-white">{item.employee.name}</td>
+                                <td className="px-4 py-3 text-slate-300 text-xs">{item.employee.position}</td>
+                                <td className="px-4 py-3 text-slate-300 text-xs">{item.employee.department}</td>
+                                <td className="px-4 py-3 font-mono text-slate-300 text-xs">{item.employee.cpf}</td>
+                                <td className="px-4 py-3 font-mono text-slate-300 text-xs">{item.employee.pis}</td>
+                                <td className="px-4 py-3 text-right text-slate-300">{item.workedHours}h</td>
+                                <td className="px-4 py-3 text-right text-green-400">{item.overtimeHours}h</td>
+                                <td className="px-4 py-3 text-right text-indigo-400">{item.nightHours}h</td>
+                                <td className="px-4 py-3 text-right text-orange-400">{item.lateMinutes}m</td>
+                                <td className="px-4 py-3 text-right text-red-400">{item.absenceMinutes}m</td>
+                              </tr>
+                            ))}
+                            {payrollData.payrollData.length > 0 && (
+                              <tr className="bg-slate-600 border-t-2 border-slate-500 font-bold">
+                                <td colSpan={5} className="px-4 py-3 text-right text-white">
+                                  TOTAIS:
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-100">
+                                  {(
+                                    payrollData.payrollData.reduce((sum, item) => sum + parseFloat(item.workedHours), 0)
+                                  ).toFixed(1)}
+                                  h
+                                </td>
+                                <td className="px-4 py-3 text-right text-green-400">
+                                  {(
+                                    payrollData.payrollData.reduce((sum, item) => sum + parseFloat(item.overtimeHours), 0)
+                                  ).toFixed(1)}
+                                  h
+                                </td>
+                                <td className="px-4 py-3 text-right text-indigo-400">
+                                  {(
+                                    payrollData.payrollData.reduce((sum, item) => sum + parseFloat(item.nightHours), 0)
+                                  ).toFixed(1)}
+                                  h
+                                </td>
+                                <td className="px-4 py-3 text-right text-orange-400">
+                                  {payrollData.payrollData.reduce((sum, item) => sum + item.lateMinutes, 0)}m
+                                </td>
+                                <td className="px-4 py-3 text-right text-red-400">
+                                  {payrollData.payrollData.reduce((sum, item) => sum + item.absenceMinutes, 0)}m
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 ) : (
