@@ -427,7 +427,7 @@ export default function SchedulesPage() {
     {
       key: 'date',
       label: 'Data',
-      render: (date: string) => new Date(date).toLocaleDateString('pt-BR'),
+      render: (date: string) => new Date(date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
     },
     { key: 'type', label: 'Tipo', render: (type: string) => {
       const labels: any = { NATIONAL: 'Nacional', STATE: 'Estadual', MUNICIPAL: 'Municipal', COMPANY: 'Empresa' };

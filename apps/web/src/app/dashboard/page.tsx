@@ -12,8 +12,10 @@ interface DashboardStats {
   devices: number;
   devicesOnline: number;
   pendingTimesheets: number;
+  approvedTimesheets: number;
   todayPunches: number;
   todayPresent: number;
+  nextHoliday: { name: string; date: string } | null;
 }
 
 interface RecentPunch {
@@ -35,11 +37,13 @@ export default function DashboardPage() {
   const router = useRouter();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [stats, setStats] = useState<DashboardStats>({
-    employees: 0, branches: 0, devices: 0, devicesOnline: 0, pendingTimesheets: 0, todayPunches: 0, todayPresent: 0,
+    employees: 0, branches: 0, devices: 0, devicesOnline: 0, pendingTimesheets: 0, approvedTimesheets: 0, todayPunches: 0, todayPresent: 0, nextHoliday: null,
   });
   const [statsLoading, setStatsLoading] = useState(true);
   const [recentPunches, setRecentPunches] = useState<RecentPunch[]>([]);
   const [weekData, setWeekData] = useState<WeekDay[]>([]);
+  const [systemHealth, setSystemHealth] = useState<{ api: boolean; db: boolean; redis: boolean }>({ api: false, db: false, redis: false });
+  const [alerts, setAlerts] = useState<{ type: string; message: string; color: string }[]>([]);
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -57,43 +61,94 @@ export default function DashboardPage() {
       fetchStats();
       fetchRecentPunches();
       fetchWeekData();
+      checkSystemHealth();
     }
   }, [isAuthenticated]);
 
   const fetchStats = async () => {
     try {
       setStatsLoading(true);
-      const [empRes, branchRes, deviceRes, tsRes, punchesRes] = await Promise.all([
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+
+      const [empRes, branchRes, deviceRes, tsOpenRes, tsApprovedRes, punchesRes, holidaysRes] = await Promise.all([
         apiClient.get('/employees', { params: { take: 1 } }).catch(() => ({ data: { total: 0 } })),
         apiClient.get('/branches', { params: { take: 1 } }).catch(() => ({ data: { total: 0 } })),
         apiClient.get('/devices', { params: { take: 999 } }).catch(() => ({ data: { data: [], total: 0 } })),
-        apiClient.get('/timesheets', { params: { take: 1 } }).catch(() => ({ data: { total: 0 } })),
+        apiClient.get('/timesheets', { params: { take: 1, month: currentMonth, year: currentYear, status: 'OPEN' } }).catch(() => ({ data: { total: 0 } })),
+        apiClient.get('/timesheets', { params: { take: 1, month: currentMonth, year: currentYear, status: 'APPROVED' } }).catch(() => ({ data: { total: 0 } })),
         apiClient.get('/punches/raw', { params: { take: 500 } }).catch(() => ({ data: { data: [], total: 0 } })),
+        apiClient.get('/holidays', { params: { take: 50, year: currentYear } }).catch(() => ({ data: { data: [] } })),
       ]);
 
       const devices = deviceRes.data.data || [];
       const onlineDevices = devices.filter((d: any) => d.status === 'online').length;
 
       // Calculate today's stats from punches
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const allPunches = punchesRes.data.data || [];
       const todayPunches = allPunches.filter((p: any) => p.punchTime && p.punchTime.startsWith(todayStr));
       const uniqueEmployeesToday = new Set(todayPunches.map((p: any) => p.employee?.id).filter(Boolean));
 
-      setStats({
+      // Find next holiday
+      const holidays = holidaysRes.data.data || [];
+      const todayTime = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const upcoming = holidays
+        .map((h: any) => ({ ...h, dateObj: new Date(h.date) }))
+        .filter((h: any) => h.dateObj.getTime() >= todayTime)
+        .sort((a: any, b: any) => a.dateObj.getTime() - b.dateObj.getTime());
+      const nextHoliday = upcoming.length > 0 ? { name: upcoming[0].name, date: upcoming[0].date } : null;
+
+      const newStats = {
         employees: empRes.data.total || 0,
         branches: branchRes.data.total || 0,
         devices: deviceRes.data.total || devices.length || 0,
         devicesOnline: onlineDevices,
-        pendingTimesheets: tsRes.data.total || 0,
+        pendingTimesheets: tsOpenRes.data.total || 0,
+        approvedTimesheets: tsApprovedRes.data.total || 0,
         todayPunches: todayPunches.length,
         todayPresent: uniqueEmployeesToday.size,
-      });
+        nextHoliday,
+      };
+      setStats(newStats);
+
+      // Build alerts
+      const newAlerts: { type: string; message: string; color: string }[] = [];
+      if (newStats.pendingTimesheets > 0) {
+        newAlerts.push({ type: 'warning', message: `${newStats.pendingTimesheets} folha(s) de ponto pendente(s) de aprovação`, color: 'amber' });
+      }
+      if (newStats.employees > 0 && newStats.todayPresent === 0 && now.getHours() >= 9 && now.getDay() >= 1 && now.getDay() <= 5) {
+        newAlerts.push({ type: 'alert', message: 'Nenhum colaborador registrou ponto hoje', color: 'red' });
+      }
+      if (nextHoliday) {
+        const daysUntil = Math.ceil((new Date(nextHoliday.date).getTime() - todayTime) / (1000 * 60 * 60 * 24));
+        if (daysUntil <= 7 && daysUntil >= 0) {
+          newAlerts.push({ type: 'info', message: `Próximo feriado: ${nextHoliday.name} em ${daysUntil === 0 ? 'hoje' : daysUntil === 1 ? 'amanhã' : `${daysUntil} dias`}`, color: 'blue' });
+        }
+      }
+      setAlerts(newAlerts);
     } catch (err) {
       console.error('Erro ao carregar estatisticas', err);
     } finally {
       setStatsLoading(false);
+    }
+  };
+
+  const checkSystemHealth = async () => {
+    try {
+      const res = await apiClient.get('/health').catch(() => null);
+      if (res && res.data) {
+        setSystemHealth({
+          api: true,
+          db: res.data.database === 'connected' || res.data.status === 'ok',
+          redis: res.data.redis === 'connected' || res.data.status === 'ok',
+        });
+      } else {
+        setSystemHealth({ api: false, db: false, redis: false });
+      }
+    } catch {
+      setSystemHealth({ api: false, db: false, redis: false });
     }
   };
 
@@ -172,18 +227,6 @@ export default function DashboardPage() {
       href: '/employees',
     },
     {
-      label: 'Filiais',
-      value: stats.branches,
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-      color: 'emerald',
-      href: '/branches',
-    },
-    {
       label: 'Presentes Hoje',
       value: stats.todayPresent,
       icon: (
@@ -195,6 +238,17 @@ export default function DashboardPage() {
       href: '/punches',
     },
     {
+      label: 'Folhas Pendentes',
+      value: stats.pendingTimesheets,
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+      color: 'amber',
+      href: '/timesheets',
+    },
+    {
       label: 'Registros Hoje',
       value: stats.todayPunches,
       icon: (
@@ -202,7 +256,7 @@ export default function DashboardPage() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       ),
-      color: 'amber',
+      color: 'violet',
       href: '/punches',
     },
   ];
@@ -242,6 +296,34 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          {alerts.map((alert, i) => {
+            const alertColors: Record<string, string> = {
+              amber: 'bg-amber-50 border-amber-200 text-amber-800',
+              red: 'bg-red-50 border-red-200 text-red-800',
+              blue: 'bg-blue-50 border-blue-200 text-blue-800',
+            };
+            const iconColors: Record<string, string> = {
+              amber: 'text-amber-500',
+              red: 'text-red-500',
+              blue: 'text-blue-500',
+            };
+            return (
+              <div key={i} className={`flex items-center gap-3 px-4 py-3 rounded-lg border ${alertColors[alert.color] || alertColors.blue}`}>
+                <svg className={`w-5 h-5 flex-shrink-0 ${iconColors[alert.color] || iconColors.blue}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {alert.type === 'warning' && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />}
+                  {alert.type === 'alert' && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
+                  {alert.type === 'info' && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
+                </svg>
+                <span className="text-sm font-medium">{alert.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -366,17 +448,17 @@ export default function DashboardPage() {
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-slate-900">Status do Sistema</h2>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                Online
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${systemHealth.api ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${systemHealth.api ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                {systemHealth.api ? 'Online' : 'Offline'}
               </span>
             </div>
             <div className="space-y-2">
               {[
-                { name: 'API', status: 'OK', ok: true },
-                { name: 'Banco de Dados', status: 'OK', ok: true },
-                { name: 'Redis', status: 'OK', ok: true },
-                { name: 'Dispositivos', status: stats.devicesOnline > 0 ? `${stats.devicesOnline} on` : '0', ok: stats.devicesOnline > 0 },
+                { name: 'API', status: systemHealth.api ? 'OK' : 'Erro', ok: systemHealth.api },
+                { name: 'Banco de Dados', status: systemHealth.db ? 'Conectado' : 'Verificando...', ok: systemHealth.db },
+                { name: 'Redis', status: systemHealth.redis ? 'Conectado' : 'Verificando...', ok: systemHealth.redis },
+                { name: 'Dispositivos', status: stats.devices > 0 ? `${stats.devices} cadastrado(s)` : 'Nenhum', ok: stats.devices > 0 },
               ].map((service) => (
                 <div key={service.name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50">
                   <div className="flex items-center gap-2">
@@ -390,6 +472,17 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
+
+          {/* Next Holiday */}
+          {stats.nextHoliday && (
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-5">
+              <h2 className="text-sm font-semibold text-blue-900 mb-2">Próximo Feriado</h2>
+              <div className="text-lg font-bold text-blue-800">{stats.nextHoliday.name}</div>
+              <div className="text-sm text-blue-600 mt-1">
+                {new Date(stats.nextHoliday.date).toLocaleDateString('pt-BR', { timeZone: 'UTC', weekday: 'long', day: '2-digit', month: 'long' })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -326,6 +326,29 @@ export default function EmployeesPage() {
             </select>
           </div>
           <button
+            onClick={() => {
+              const headers = ['Nome', 'CPF', 'Cargo', 'Departamento', 'Filial', 'Escala', 'Telefone', 'Email', 'Admissão'];
+              const rows = employees.map((e: any) => [
+                e.name, e.cpf, e.position || '', e.department || '', e.branch?.name || '', e.schedule?.name || '', e.phone || '', e.email || '',
+                e.admissionDate ? new Date(e.admissionDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '',
+              ]);
+              const csv = [headers.join(';'), ...rows.map((r: any) => r.join(';'))].join('\n');
+              const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `colaboradores_${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 transition-colors font-semibold text-sm shadow-md hover:shadow-lg"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Exportar CSV
+          </button>
+          <button
             onClick={handleAddClick}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:bg-indigo-800 transition-colors font-semibold text-sm shadow-md hover:shadow-lg"
           >
