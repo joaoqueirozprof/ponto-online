@@ -1,5 +1,7 @@
 FROM node:20-alpine
 
+ARG CACHEBUST=33
+
 WORKDIR /app
 
 # Install OpenSSL for Prisma (Alpine 3.20+ uses OpenSSL 3.x)
