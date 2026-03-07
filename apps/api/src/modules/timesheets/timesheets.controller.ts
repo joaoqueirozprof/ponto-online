@@ -44,6 +44,26 @@ export class TimesheetsController {
     return this.timesheetsService.getTimesheet(employeeId, month, year);
   }
 
+  @Post('calculate/:employeeId/:month/:year')
+  @ApiOperation({ summary: 'Calculate timesheet for an employee' })
+  calculateTimesheet(
+    @Param('employeeId') employeeId: string,
+    @Param('month') month: number,
+    @Param('year') year: number,
+  ) {
+    return this.timesheetsService.calculateTimesheet(employeeId, month, year);
+  }
+
+  @Post('calculate-batch')
+  @ApiOperation({ summary: 'Calculate timesheets for all employees in a period' })
+  calculateBatch(
+    @Body('month') month: number,
+    @Body('year') year: number,
+    @Body('branchId') branchId?: string,
+  ) {
+    return this.timesheetsService.calculateBatch(month, year, branchId);
+  }
+
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update timesheet status' })
   updateStatus(
