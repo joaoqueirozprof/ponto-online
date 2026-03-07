@@ -48,7 +48,9 @@ export class TimesheetsService {
     });
   }
 
-  async listTimesheets(branchId?: string, skip = 0, take = 10) {
+  async listTimesheets(branchId?: string, skip: any = 0, take: any = 10) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 10;
     const where: any = {};
     if (branchId) {
       where.employee = {

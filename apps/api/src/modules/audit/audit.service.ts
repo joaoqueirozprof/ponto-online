@@ -47,7 +47,9 @@ export class AuditService {
     return { data, total, skip, take };
   }
 
-  async getUserAuditLogs(userId: string, skip = 0, take = 50) {
+  async getUserAuditLogs(userId: string, skip: any = 0, take: any = 50) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 50;
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
         where: { userId },

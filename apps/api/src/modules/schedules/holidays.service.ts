@@ -14,7 +14,9 @@ export class HolidaysService {
     });
   }
 
-  async findAll(branchId?: string, skip = 0, take = 50) {
+  async findAll(branchId?: string, skip: any = 0, take: any = 50) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 50;
     const where = branchId ? { branchId } : {};
 
     const [data, total] = await Promise.all([

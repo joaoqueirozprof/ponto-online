@@ -23,7 +23,9 @@ export class DevicesService {
     });
   }
 
-  async findAll(branchId?: string, skip = 0, take = 10) {
+  async findAll(branchId?: string, skip: any = 0, take: any = 10) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 10;
     const where = branchId ? { branchId } : {};
 
     const [data, total] = await Promise.all([

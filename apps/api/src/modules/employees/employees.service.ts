@@ -29,7 +29,9 @@ export class EmployeesService {
     });
   }
 
-  async findAll(branchId?: string, skip = 0, take = 10, isActive?: boolean) {
+  async findAll(branchId?: string, skip: any = 0, take: any = 10, isActive?: boolean) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 10;
     const where: any = {};
     if (branchId) where.branchId = branchId;
     if (isActive !== undefined) where.isActive = isActive;

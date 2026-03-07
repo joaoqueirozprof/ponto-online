@@ -21,7 +21,9 @@ export class CompaniesService {
     });
   }
 
-  async findAll(skip = 0, take = 10) {
+  async findAll(skip: any = 0, take: any = 10) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 10;
     const [data, total] = await Promise.all([
       this.prisma.company.findMany({
         skip,

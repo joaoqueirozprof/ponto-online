@@ -106,7 +106,9 @@ export class SyncService {
     };
   }
 
-  async getEmployeesForSync(branchId: string, skip = 0, take = 1000) {
+  async getEmployeesForSync(branchId: string, skip: any = 0, take: any = 1000) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 1000;
     const employees = await this.prisma.employee.findMany({
       where: {
         branchId,

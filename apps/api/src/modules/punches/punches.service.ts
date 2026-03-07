@@ -15,7 +15,9 @@ export class PunchesService {
     });
   }
 
-  async getRawPunches(employeeId?: string, deviceId?: string, skip = 0, take = 100) {
+  async getRawPunches(employeeId?: string, deviceId?: string, skip: any = 0, take: any = 100) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 100;
     const where: any = {};
     if (employeeId) where.employeeId = employeeId;
     if (deviceId) where.deviceId = deviceId;
@@ -37,7 +39,9 @@ export class PunchesService {
     return { data, total, skip, take };
   }
 
-  async getNormalizedPunches(employeeId?: string, skip = 0, take = 100) {
+  async getNormalizedPunches(employeeId?: string, skip: any = 0, take: any = 100) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 100;
     const where = employeeId ? { employeeId } : {};
 
     const [data, total] = await Promise.all([
@@ -90,7 +94,9 @@ export class PunchesService {
     return adjustment;
   }
 
-  async getPunchAdjustments(employeeId?: string, skip = 0, take = 50) {
+  async getPunchAdjustments(employeeId?: string, skip: any = 0, take: any = 50) {
+    skip = Number(skip) || 0;
+    take = Number(take) || 50;
     const where = employeeId ? { employeeId } : {};
 
     const [data, total] = await Promise.all([
