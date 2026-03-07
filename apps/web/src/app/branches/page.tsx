@@ -115,6 +115,8 @@ export default function BranchesPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const pageSize = 10;
   const [formData, setFormData] = useState({
     companyId: '',
@@ -127,9 +129,17 @@ export default function BranchesPage() {
   });
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     fetchBranches();
     fetchCompanies();
-  }, [currentPage]);
+  }, [currentPage, debouncedSearch]);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
     const id = Date.now().toString();
@@ -144,7 +154,9 @@ export default function BranchesPage() {
     try {
       setLoading(true);
       const skip = (currentPage - 1) * pageSize;
-      const response = await apiClient.get('/branches', { params: { skip, take: pageSize } });
+      const params: any = { skip, take: pageSize };
+      if (debouncedSearch) params.search = debouncedSearch;
+      const response = await apiClient.get('/branches', { params });
       setBranches(response.data.data || []);
       setTotalCount(response.data.total || 0);
     } catch (error) {
@@ -329,6 +341,20 @@ export default function BranchesPage() {
           </svg>
           Adicionar Filial
         </button>
+      </div>
+
+      {/* Search Input */}
+      <div className="relative flex-1 max-w-md">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Buscar por nome, código..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
+        />
       </div>
 
       {/* Data Table */}

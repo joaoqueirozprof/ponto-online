@@ -33,8 +33,9 @@ export class DevicesController {
     @Query('branchId') branchId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
+    @Query('search') search?: string,
   ) {
-    return this.devicesService.findAll(branchId, skip, take);
+    return this.devicesService.findAll(branchId, skip, take, search);
   }
 
   @Get(':id')

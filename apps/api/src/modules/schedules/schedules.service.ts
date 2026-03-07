@@ -21,10 +21,16 @@ export class SchedulesService {
     });
   }
 
-  async findAll(branchId?: string, skip: any = 0, take: any = 10) {
+  async findAll(branchId?: string, skip: any = 0, take: any = 10, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
-    const where = branchId ? { branchId } : {};
+    const where: any = {};
+    if (branchId) where.branchId = branchId;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.workSchedule.findMany({

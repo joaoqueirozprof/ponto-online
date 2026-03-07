@@ -74,12 +74,22 @@ export default function TimesheetsPage() {
     message: '',
   });
   const [filterBranch, setFilterBranch] = useState('');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const pageSize = 10;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     fetchTimesheets();
     fetchBranches();
-  }, [currentPage, filterBranch]);
+  }, [currentPage, filterBranch, debouncedSearch]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     const id = Date.now().toString();
@@ -94,6 +104,7 @@ export default function TimesheetsPage() {
       const skip = (currentPage - 1) * pageSize;
       const params: any = { skip, take: pageSize };
       if (filterBranch) params.branchId = filterBranch;
+      if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/timesheets', { params });
       setTimesheets(response.data.data || []);
       setTotalCount(response.data.total || 0);
@@ -268,21 +279,35 @@ export default function TimesheetsPage() {
 
         {/* Filter Card */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
-          <div className="space-y-3">
-            <label htmlFor="branch-filter" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Filtrar por Filial
-            </label>
-            <select
-              id="branch-filter"
-              value={filterBranch}
-              onChange={(e) => { setFilterBranch(e.target.value); setCurrentPage(1); }}
-              className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 dark:focus:ring-offset-slate-800 transition-colors"
-            >
-              <option value="">Todas as filiais</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>{branch.name}</option>
-              ))}
-            </select>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="branch-filter" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
+                Filtrar por Filial
+              </label>
+              <select
+                id="branch-filter"
+                value={filterBranch}
+                onChange={(e) => { setFilterBranch(e.target.value); setCurrentPage(1); }}
+                className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 dark:focus:ring-offset-slate-800 transition-colors"
+              >
+                <option value="">Todas as filiais</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="relative flex-1 max-w-md">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Buscar por nome do funcionário..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:focus:ring-offset-slate-800 transition-all text-sm"
+              />
+            </div>
           </div>
         </div>
 

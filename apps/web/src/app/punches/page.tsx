@@ -63,16 +63,26 @@ export default function PunchesPage() {
   const [endDate, setEndDate] = useState('');
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
     fetchEmployees();
   }, []);
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     if (activeTab === 'raw') fetchRawPunches();
     else if (activeTab === 'normalized') fetchNormalizedPunches();
     else fetchAdjustments();
-  }, [activeTab, currentPage, filterEmployee, startDate, endDate]);
+  }, [activeTab, currentPage, filterEmployee, startDate, endDate, debouncedSearch]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -100,6 +110,7 @@ export default function PunchesPage() {
       if (filterEmployee) params.employeeId = filterEmployee;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
+      if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/punches/raw', { params });
       setRawPunches(response.data.data || []);
       setTotalCount(response.data.total || 0);
@@ -119,6 +130,7 @@ export default function PunchesPage() {
       if (filterEmployee) params.employeeId = filterEmployee;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
+      if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/punches/normalized', { params });
       setNormalizedPunches(response.data.data || []);
       setTotalCount(response.data.total || 0);
@@ -136,6 +148,7 @@ export default function PunchesPage() {
       const skip = (currentPage - 1) * pageSize;
       const params: any = { skip, take: pageSize };
       if (filterEmployee) params.employeeId = filterEmployee;
+      if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/punches/adjustments', { params });
       setAdjustments(response.data.data || []);
       setTotalCount(response.data.total || 0);
@@ -370,7 +383,23 @@ export default function PunchesPage() {
         {/* Filters Section */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Filtros</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-4">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Buscar por nome do funcionário..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            {/* Filters Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Employee Filter */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
@@ -427,6 +456,7 @@ export default function PunchesPage() {
                 </div>
               </>
             )}
+            </div>
           </div>
         </div>
 

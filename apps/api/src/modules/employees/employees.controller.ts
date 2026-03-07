@@ -35,8 +35,9 @@ export class EmployeesController {
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
     @Query('isActive') isActive?: boolean,
+    @Query('search') search?: string,
   ) {
-    return this.employeesService.findAll(branchId, skip, take, isActive);
+    return this.employeesService.findAll(branchId, skip, take, isActive, search);
   }
 
   @Get(':id')

@@ -25,8 +25,9 @@ export class TimesheetsController {
     @Query('branchId') branchId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
+    @Query('search') search?: string,
   ) {
-    return this.timesheetsService.listTimesheets(branchId, skip, take);
+    return this.timesheetsService.listTimesheets(branchId, skip, take, search);
   }
 
   @Get(':employeeId/:month/:year')

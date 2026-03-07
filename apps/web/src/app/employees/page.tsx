@@ -65,11 +65,21 @@ export default function EmployeesPage() {
   const pageSize = 10;
   const [filterBranch, setFilterBranch] = useState('');
   const [formData, setFormData] = useState<FormData>(initialFormData);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
     fetchEmployees();
     fetchBranches();
-  }, [currentPage, filterBranch]);
+  }, [currentPage, filterBranch, debouncedSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -85,6 +95,7 @@ export default function EmployeesPage() {
       const skip = (currentPage - 1) * pageSize;
       const params: any = { skip, take: pageSize };
       if (filterBranch) params.branchId = filterBranch;
+      if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/employees', { params });
       setEmployees(response.data.data || []);
       setTotalCount(response.data.total || 0);
@@ -235,6 +246,18 @@ export default function EmployeesPage() {
       {/* Filters */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="flex gap-4 items-end">
+          <div className="relative flex-1 max-w-md">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Buscar por nome, CPF, função..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
+            />
+          </div>
           <div className="flex-1">
             <label className="block text-sm font-semibold text-slate-700 mb-2">Filtrar por Filial</label>
             <select

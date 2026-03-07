@@ -34,8 +34,9 @@ export class BranchesController {
     @Query('companyId') companyId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
+    @Query('search') search?: string,
   ) {
-    return this.branchesService.findAll(companyId, skip, take);
+    return this.branchesService.findAll(companyId, skip, take, search);
   }
 
   @Get(':id')

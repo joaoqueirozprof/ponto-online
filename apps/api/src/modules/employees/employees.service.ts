@@ -29,12 +29,22 @@ export class EmployeesService {
     });
   }
 
-  async findAll(branchId?: string, skip: any = 0, take: any = 10, isActive?: boolean) {
+  async findAll(branchId?: string, skip: any = 0, take: any = 10, isActive?: boolean, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
     const where: any = {};
     if (branchId) where.branchId = branchId;
     if (isActive !== undefined) where.isActive = isActive;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { cpf: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { registration: { contains: search, mode: 'insensitive' } },
+        { position: { contains: search, mode: 'insensitive' } },
+        { department: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.employee.findMany({

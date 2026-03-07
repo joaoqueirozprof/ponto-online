@@ -15,12 +15,18 @@ export class PunchesService {
     });
   }
 
-  async getRawPunches(employeeId?: string, deviceId?: string, skip: any = 0, take: any = 100) {
+  async getRawPunches(employeeId?: string, deviceId?: string, skip: any = 0, take: any = 100, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 100;
     const where: any = {};
     if (employeeId) where.employeeId = employeeId;
     if (deviceId) where.deviceId = deviceId;
+    if (search) {
+      where.employee = {
+        ...where.employee,
+        name: { contains: search, mode: 'insensitive' },
+      };
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.rawPunchEvent.findMany({

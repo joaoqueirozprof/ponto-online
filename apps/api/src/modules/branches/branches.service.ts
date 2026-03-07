@@ -24,10 +24,18 @@ export class BranchesService {
     });
   }
 
-  async findAll(companyId?: string, skip: any = 0, take: any = 10) {
+  async findAll(companyId?: string, skip: any = 0, take: any = 10, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
-    const where = companyId ? { companyId } : {};
+    const where: any = {};
+    if (companyId) where.companyId = companyId;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.branch.findMany({

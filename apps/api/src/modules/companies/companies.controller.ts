@@ -33,8 +33,9 @@ export class CompaniesController {
   findAll(
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
+    @Query('search') search?: string,
   ) {
-    return this.companiesService.findAll(skip, take);
+    return this.companiesService.findAll(skip, take, search);
   }
 
   @Get(':id')

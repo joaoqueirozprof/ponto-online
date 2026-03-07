@@ -45,6 +45,8 @@ export default function SchedulesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const pageSize = 10;
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -83,13 +85,21 @@ export default function SchedulesPage() {
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     fetchBranches();
   }, []);
 
   useEffect(() => {
     if (activeTab === 'schedules') fetchSchedules();
     else fetchHolidays();
-  }, [activeTab, currentPage]);
+  }, [activeTab, currentPage, debouncedSearch]);
 
   const fetchBranches = async () => {
     try {
@@ -105,7 +115,9 @@ export default function SchedulesPage() {
     try {
       setLoading(true);
       const skip = (currentPage - 1) * pageSize;
-      const response = await apiClient.get('/schedules', { params: { skip, take: pageSize } });
+      const params: any = { skip, take: pageSize };
+      if (debouncedSearch) params.search = debouncedSearch;
+      const response = await apiClient.get('/schedules', { params });
       setSchedules(response.data.data || []);
       setTotalCount(response.data.total || 0);
     } catch (error) {
@@ -156,7 +168,7 @@ export default function SchedulesPage() {
     e.preventDefault();
     try {
       if (editingId) {
-        await apiClient.put(`/schedules/${editingId}`, scheduleForm);
+        await apiClient.patch(`/schedules/${editingId}`, scheduleForm);
         addToast('Escala atualizada com sucesso', 'success');
       } else {
         await apiClient.post('/schedules', scheduleForm);
@@ -175,7 +187,7 @@ export default function SchedulesPage() {
     e.preventDefault();
     try {
       if (editingId) {
-        await apiClient.put(`/holidays/${editingId}`, holidayForm);
+        await apiClient.patch(`/holidays/${editingId}`, holidayForm);
         addToast('Feriado atualizado com sucesso', 'success');
       } else {
         await apiClient.post('/holidays', holidayForm);
@@ -188,6 +200,27 @@ export default function SchedulesPage() {
       console.error(error);
       addToast('Erro ao salvar feriado', 'error');
     }
+  };
+
+  const handleEditSchedule = (schedule: any) => {
+    setEditingId(schedule.id);
+    setScheduleForm({
+      name: schedule.name,
+      type: schedule.type,
+      branchId: schedule.branchId || schedule.branch?.id || '',
+    });
+    setShowModal(true);
+  };
+
+  const handleEditHoliday = (holiday: any) => {
+    setEditingId(holiday.id);
+    setHolidayForm({
+      name: holiday.name,
+      date: holiday.date ? holiday.date.split('T')[0] : '',
+      type: holiday.type,
+      branchId: holiday.branchId || holiday.branch?.id || '',
+    });
+    setShowModal(true);
   };
 
   const handleDeleteSchedule = (id: string) => {
@@ -244,8 +277,14 @@ export default function SchedulesPage() {
     {
       key: 'id',
       label: 'Ações',
-      render: (id: string) => (
+      render: (id: string, row: any) => (
         <div className="flex gap-2">
+          <button
+            onClick={() => handleEditSchedule(row)}
+            className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors font-medium"
+          >
+            Editar
+          </button>
           <button
             onClick={() => handleDeleteSchedule(id)}
             className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors font-medium"
@@ -273,8 +312,14 @@ export default function SchedulesPage() {
     {
       key: 'id',
       label: 'Ações',
-      render: (id: string) => (
+      render: (id: string, row: any) => (
         <div className="flex gap-2">
+          <button
+            onClick={() => handleEditHoliday(row)}
+            className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors font-medium"
+          >
+            Editar
+          </button>
           <button
             onClick={() => handleDeleteHoliday(id)}
             className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors font-medium"
@@ -348,8 +393,20 @@ export default function SchedulesPage() {
         </button>
       </div>
 
-      {/* Add Button */}
-      <div className="flex justify-end">
+      {/* Search + Add Button */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder={activeTab === 'schedules' ? 'Buscar escalas por nome...' : 'Buscar feriados por nome...'}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
+          />
+        </div>
         <button
           onClick={activeTab === 'schedules' ? handleAddSchedule : handleAddHoliday}
           className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:shadow-lg hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 font-medium text-sm"

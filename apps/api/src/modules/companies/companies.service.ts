@@ -21,11 +21,19 @@ export class CompaniesService {
     });
   }
 
-  async findAll(skip: any = 0, take: any = 10) {
+  async findAll(skip: any = 0, take: any = 10, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { cnpj: { contains: search, mode: 'insensitive' } },
+      ];
+    }
     const [data, total] = await Promise.all([
       this.prisma.company.findMany({
+        where,
         skip,
         take,
         include: {
@@ -41,7 +49,7 @@ export class CompaniesService {
           createdAt: 'desc',
         },
       }),
-      this.prisma.company.count(),
+      this.prisma.company.count({ where }),
     ]);
 
     return {
