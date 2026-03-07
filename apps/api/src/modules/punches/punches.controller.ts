@@ -40,6 +40,14 @@ export class PunchesController {
     return this.punchesService.getNormalizedPunches(employeeId, skip, take);
   }
 
+  @Post('manual')
+  @ApiOperation({ summary: 'Create a manual punch record' })
+  createManualPunch(
+    @Body() createManualPunchDto: any,
+  ) {
+    return this.punchesService.createManualPunch(createManualPunchDto);
+  }
+
   @Post(':id/adjust')
   @ApiOperation({ summary: 'Adjust a punch record' })
   adjustPunch(

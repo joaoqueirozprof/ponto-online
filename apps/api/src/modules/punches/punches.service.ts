@@ -100,6 +100,62 @@ export class PunchesService {
     return adjustment;
   }
 
+  async createManualPunch(dto: { employeeId: string; punchTime: string; punchType: string; reason: string; createdBy: string }) {
+    // Create raw punch event first (source = MANUAL, deviceId not required for manual)
+    // We need a device to satisfy the relation - use a virtual/manual device
+    let manualDevice = await this.prisma.device.findFirst({
+      where: { serialNumber: 'MANUAL-ENTRY' },
+    });
+
+    if (!manualDevice) {
+      // Get the first branch to associate the manual device
+      const firstBranch = await this.prisma.branch.findFirst();
+      if (!firstBranch) {
+        throw new NotFoundException('No branch found. Please create a branch first.');
+      }
+      manualDevice = await this.prisma.device.create({
+        data: {
+          name: 'Registro Manual',
+          serialNumber: 'MANUAL-ENTRY',
+          model: 'Manual',
+          branchId: firstBranch.id,
+          status: 'ONLINE',
+          location: 'Sistema',
+        },
+      });
+    }
+
+    const punchTime = new Date(dto.punchTime);
+
+    const rawPunch = await this.prisma.rawPunchEvent.create({
+      data: {
+        deviceId: manualDevice.id,
+        employeeId: dto.employeeId,
+        punchTime,
+        source: 'MANUAL',
+        rawData: { reason: dto.reason, createdBy: dto.createdBy },
+      },
+    });
+
+    const normalizedPunch = await this.prisma.normalizedPunch.create({
+      data: {
+        rawPunchEventId: rawPunch.id,
+        employeeId: dto.employeeId,
+        punchTime,
+        punchType: dto.punchType as any,
+        status: 'MANUAL',
+        originalTime: punchTime,
+        adjustedBy: dto.createdBy,
+        adjustmentReason: dto.reason,
+      },
+      include: {
+        employee: { select: { id: true, name: true, cpf: true } },
+      },
+    });
+
+    return normalizedPunch;
+  }
+
   async getPunchAdjustments(employeeId?: string, skip: any = 0, take: any = 50) {
     skip = Number(skip) || 0;
     take = Number(take) || 50;

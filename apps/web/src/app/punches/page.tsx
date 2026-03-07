@@ -73,6 +73,15 @@ export default function PunchesPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [summary, setSummary] = useState<PunchSummary>({ totalToday: 0, uniqueEmployees: 0, entriesCount: 0, exitsCount: 0 });
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    employeeId: '',
+    date: new Date().toISOString().slice(0, 10),
+    time: '',
+    punchType: 'ENTRY',
+    reason: '',
+  });
+  const [submittingManual, setSubmittingManual] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
@@ -123,6 +132,35 @@ export default function PunchesPage() {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
+  };
+
+  const handleManualSubmit = async () => {
+    if (!manualForm.employeeId || !manualForm.date || !manualForm.time || !manualForm.reason) {
+      showToast('Preencha todos os campos obrigatórios', 'error');
+      return;
+    }
+    setSubmittingManual(true);
+    try {
+      const punchTime = `${manualForm.date}T${manualForm.time}:00.000Z`;
+      await apiClient.post('/punches/manual', {
+        employeeId: manualForm.employeeId,
+        punchTime,
+        punchType: manualForm.punchType,
+        reason: manualForm.reason,
+        createdBy: 'admin',
+      });
+      showToast('Registro manual criado com sucesso!', 'success');
+      setShowManualModal(false);
+      setManualForm({ employeeId: '', date: new Date().toISOString().slice(0, 10), time: '', punchType: 'ENTRY', reason: '' });
+      // Refresh data
+      if (activeTab === 'raw') fetchRawPunches();
+      else if (activeTab === 'normalized') fetchNormalizedPunches();
+      fetchSummary();
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || 'Erro ao criar registro manual', 'error');
+    } finally {
+      setSubmittingManual(false);
+    }
   };
 
   const fetchEmployees = async () => {
@@ -381,9 +419,20 @@ export default function PunchesPage() {
 
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header Section */}
-        <div className="space-y-2">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Registros de Ponto</h1>
-          <p className="text-base text-slate-600 dark:text-slate-400">Visualize e gerencie todos os registros de ponto</p>
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Registros de Ponto</h1>
+            <p className="text-base text-slate-600 dark:text-slate-400">Visualize e gerencie todos os registros de ponto</p>
+          </div>
+          <button
+            onClick={() => setShowManualModal(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg font-medium text-sm"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Registro Manual
+          </button>
         </div>
 
         {/* Summary Cards */}
@@ -550,6 +599,121 @@ export default function PunchesPage() {
           )}
         </div>
       </div>
+
+      {/* Manual Punch Modal */}
+      {showManualModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Registro Manual de Ponto</h2>
+                  <p className="text-sm text-slate-500 mt-1">Insira um registro quando o equipamento falhar ou o funcionário esquecer</p>
+                </div>
+                <button onClick={() => setShowManualModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Employee */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Colaborador *</label>
+                <select
+                  value={manualForm.employeeId}
+                  onChange={(e) => setManualForm({ ...manualForm, employeeId: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Selecione o colaborador...</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Date and Time */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Data *</label>
+                  <input
+                    type="date"
+                    value={manualForm.date}
+                    onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Horário *</label>
+                  <input
+                    type="time"
+                    value={manualForm.time}
+                    onChange={(e) => setManualForm({ ...manualForm, time: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Punch Type */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Tipo de Registro *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'ENTRY', label: 'Entrada', icon: '→', color: 'emerald' },
+                    { value: 'EXIT', label: 'Saída', icon: '←', color: 'red' },
+                    { value: 'BREAK_START', label: 'Início Intervalo', icon: '⏸', color: 'amber' },
+                    { value: 'BREAK_END', label: 'Fim Intervalo', icon: '▶', color: 'blue' },
+                  ].map((type) => (
+                    <button
+                      key={type.value}
+                      type="button"
+                      onClick={() => setManualForm({ ...manualForm, punchType: type.value })}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border-2 text-sm font-medium transition-all ${
+                        manualForm.punchType === type.value
+                          ? `border-${type.color}-500 bg-${type.color}-50 text-${type.color}-700 dark:bg-${type.color}-900/30 dark:text-${type.color}-300`
+                          : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                      }`}
+                    >
+                      <span>{type.icon}</span>
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Motivo / Justificativa *</label>
+                <textarea
+                  value={manualForm.reason}
+                  onChange={(e) => setManualForm({ ...manualForm, reason: e.target.value })}
+                  placeholder="Ex: Equipamento fora do ar, funcionário esqueceu de registrar..."
+                  rows={3}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end">
+              <button
+                onClick={() => setShowManualModal(false)}
+                className="px-5 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg font-medium text-sm transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleManualSubmit}
+                disabled={submittingManual}
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              >
+                {submittingManual ? 'Salvando...' : 'Registrar Ponto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
