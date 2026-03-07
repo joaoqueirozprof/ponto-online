@@ -21,6 +21,27 @@ interface Toast {
   type: 'success' | 'error';
 }
 
+const formatCNPJ = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 14);
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+};
+
+const formatPhone = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 10) {
+    return digits
+      .replace(/^(\d{2})(\d)/, '($1) $2')
+      .replace(/(\d{4})(\d)/, '$1-$2');
+  }
+  return digits
+    .replace(/^(\d{2})(\d)/, '($1) $2')
+    .replace(/(\d{5})(\d)/, '$1-$2');
+};
+
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,6 +140,32 @@ export default function CompaniesPage() {
       showToast('Erro ao salvar empresa', 'error');
       console.error(error);
     }
+  };
+
+  const handleExportCSV = () => {
+    if (companies.length === 0) {
+      showToast('Nenhuma empresa para exportar', 'error');
+      return;
+    }
+    const headers = ['Nome', 'CNPJ', 'Endereço', 'Telefone', 'Email', 'Filiais'];
+    const rows = companies.map((c) => [
+      c.name,
+      c.cnpj,
+      c.address,
+      c.phone || '-',
+      c.email,
+      String(c.branchesCount ?? '-'),
+    ]);
+    const csvContent = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `empresas-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV exportado com sucesso!', 'success');
   };
 
   const handleDelete = async (id: string) => {
@@ -230,6 +277,15 @@ export default function CompaniesPage() {
           </svg>
           Adicionar Empresa
         </button>
+        <button
+          onClick={handleExportCSV}
+          className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 active:bg-orange-700 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Exportar CSV
+        </button>
       </div>
 
       {/* Search Input */}
@@ -288,9 +344,10 @@ export default function CompaniesPage() {
               <input
                 type="text"
                 value={formData.cnpj}
-                onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, cnpj: formatCNPJ(e.target.value) })}
                 className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
                 placeholder="XX.XXX.XXX/XXXX-XX"
+                maxLength={18}
                 required
               />
             </div>
@@ -312,9 +369,10 @@ export default function CompaniesPage() {
               <input
                 type="tel"
                 value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                 className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
                 placeholder="(XX) XXXXX-XXXX"
+                maxLength={15}
               />
             </div>
 

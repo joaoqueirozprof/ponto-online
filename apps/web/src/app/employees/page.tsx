@@ -89,6 +89,7 @@ export default function EmployeesPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const pageSize = 10;
   const [filterBranch, setFilterBranch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [formData, setFormData] = useState<FormData>(initialFormData);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -97,7 +98,7 @@ export default function EmployeesPage() {
   useEffect(() => {
     fetchEmployees();
     fetchBranches();
-  }, [currentPage, filterBranch, debouncedSearch]);
+  }, [currentPage, filterBranch, filterStatus, debouncedSearch]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -145,6 +146,7 @@ export default function EmployeesPage() {
       const skip = (currentPage - 1) * pageSize;
       const params: any = { skip, take: pageSize };
       if (filterBranch) params.branchId = filterBranch;
+      if (filterStatus) params.isActive = filterStatus === 'active';
       if (debouncedSearch) params.search = debouncedSearch;
       const response = await apiClient.get('/employees', { params });
       setEmployees(response.data.data || []);
@@ -323,6 +325,18 @@ export default function EmployeesPage() {
               {branches.map((branch) => (
                 <option key={branch.id} value={branch.id}>{branch.name}</option>
               ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
+            <select
+              value={filterStatus}
+              onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-700"
+            >
+              <option value="">Todos</option>
+              <option value="active">Ativos</option>
+              <option value="inactive">Inativos</option>
             </select>
           </div>
           <button

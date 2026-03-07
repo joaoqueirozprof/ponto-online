@@ -239,6 +239,33 @@ export default function BranchesPage() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (branches.length === 0) {
+      addToast('Nenhuma filial para exportar', 'error');
+      return;
+    }
+    const headers = ['Nome', 'Código', 'Empresa', 'Endereço', 'Telefone', 'Fuso Horário', 'Tolerância (min)'];
+    const rows = branches.map((b) => [
+      b.name,
+      b.code,
+      b.company?.name || '-',
+      b.address,
+      b.phone || '-',
+      b.timezone,
+      String(b.toleranceMinutes ?? '-'),
+    ]);
+    const csvContent = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `filiais-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('CSV exportado com sucesso!', 'success');
+  };
+
   const handleDelete = async (id: string) => {
     try {
       setDeleting(id);
@@ -340,6 +367,15 @@ export default function BranchesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           Adicionar Filial
+        </button>
+        <button
+          onClick={handleExportCSV}
+          className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 active:bg-orange-700 transition-colors font-medium text-sm shadow-sm hover:shadow-md"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Exportar CSV
         </button>
       </div>
 
