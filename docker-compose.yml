@@ -33,12 +33,9 @@ services:
       - ponto-network
 
   ponto-api:
-    image: ponto-online-ponto-api:v33
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-      args:
-        CACHEBUST: "33"
     container_name: ponto-api
     restart: always
     ports:
@@ -79,12 +76,9 @@ services:
       - ponto-network
 
   ponto-web:
-    image: ponto-online-ponto-web:v19
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-      args:
-        CACHEBUST: "19"
     container_name: ponto-web
     restart: always
     ports:
