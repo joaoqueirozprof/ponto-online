@@ -15,9 +15,9 @@ node scripts/update-employee-data.js 2>&1 || echo "Employee update completed (ma
 echo "Fixing unmatched employees..."
 node scripts/fix-unmatched-employees.js 2>&1 || echo "Fix unmatched completed (may have warnings)"
 
-# 3. Migrate employee punches (old IDs -> new IDs)
-echo "Running employee punch migration..."
-node scripts/migrate-employee-punches.js 2>&1 || echo "Punch migration completed (may have warnings)"
+# 3. Migrate employee punches (old IDs -> new IDs) using psql directly
+echo "Running employee punch migration via psql..."
+PGPASSWORD=PontoSecure2026 psql -h ponto-db -U ponto_admin -d ponto_online -f scripts/migrate-employee-punches.sql 2>&1 && echo "Punch migration SUCCESS" || echo "Punch migration FAILED (check above)"
 
 # 4. Start the API
 echo "Starting API server..."
