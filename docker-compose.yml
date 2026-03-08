@@ -37,12 +37,17 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        CACHEBUST: "55"
-    image: ponto-api:v55
+        CACHEBUST: "56"
+    image: ponto-api:v56
     container_name: ponto-api
     restart: always
     ports:
       - "4010:4010"
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
+      - ./scripts:/app/scripts
+      - ./prisma:/app/prisma
     environment:
       NODE_ENV: "production"
       API_PORT: "4010"
