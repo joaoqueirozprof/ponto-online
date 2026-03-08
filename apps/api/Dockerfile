@@ -1,7 +1,5 @@
 FROM node:20-alpine
 
-ARG CACHEBUST=54
-
 WORKDIR /app
 
 # Install OpenSSL for Prisma + PostgreSQL client for direct SQL migration
@@ -15,16 +13,15 @@ RUN npm install
 COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
-# Force rebuild - build 41
-RUN echo "build-54-debug"
-
-# Copy config and source
+# Copy config and source - CACHEBUST forces rebuild from here
+ARG CACHEBUST=55
+RUN echo "CACHEBUST=${CACHEBUST}"
 COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json
 COPY apps/api/src/ ./src/
 
 # Build NestJS
-RUN npx nest build
+RUN npx nest build && echo "BUILD SUCCESS v${CACHEBUST}" || (echo "BUILD FAILED" && exit 1)
 
 # Copy update scripts
 COPY scripts/update-employee-data.js ./scripts/update-employee-data.js
@@ -36,5 +33,4 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 54
 CMD ["./entrypoint.sh"]
