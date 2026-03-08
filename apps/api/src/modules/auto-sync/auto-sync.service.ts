@@ -364,6 +364,34 @@ export class AutoSyncService {
   }
 
   /**
+   * Recalculate timesheets for a specific month/year for all active employees
+   */
+  async recalculateMonth(month: number, year: number): Promise<any> {
+    this.logger.log(`Recalculating all timesheets for ${month}/${year}...`);
+
+    const employees = await this.prisma.employee.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true },
+    });
+
+    let processed = 0;
+    let errors = 0;
+
+    for (const emp of employees) {
+      try {
+        await this.calculateTimesheet(emp.id, month, year);
+        processed++;
+      } catch (error: any) {
+        errors++;
+        this.logger.error(`Failed to recalculate for ${emp.name} ${month}/${year}: ${error.message}`);
+      }
+    }
+
+    this.logger.log(`Recalculation ${month}/${year} complete: ${processed} processed, ${errors} errors`);
+    return { processed, errors, total: employees.length, month, year };
+  }
+
+  /**
    * Calculate timesheet for a single employee/month
    * (Simplified version that calls the timesheets service logic directly)
    */

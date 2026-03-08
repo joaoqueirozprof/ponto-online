@@ -65,6 +65,12 @@ export class AutoSyncController {
     return this.autoSyncService.recalculateCurrentMonth();
   }
 
+  @Post('recalculate-month')
+  @ApiOperation({ summary: 'Recalculate all timesheets for a specific month/year' })
+  recalculateMonth(@Body() body: { month: number; year: number }) {
+    return this.autoSyncService.recalculateMonth(body.month, body.year);
+  }
+
   // ========== DEVICE COMMUNICATION ==========
 
   @Post('device/:deviceId/ping')
