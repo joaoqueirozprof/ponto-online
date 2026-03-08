@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-ARG CACHEBUST=47
+ARG CACHEBUST=48
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Force rebuild - build 41
-RUN echo "build-47-reports-refactor"
+RUN echo "build-48-punch-migration"
 
 # Copy config and source
 COPY apps/api/tsconfig.json ./tsconfig.json
@@ -29,10 +29,11 @@ RUN npx nest build
 # Copy update scripts
 COPY scripts/update-employee-data.js ./scripts/update-employee-data.js
 COPY scripts/fix-unmatched-employees.js ./scripts/fix-unmatched-employees.js
+COPY scripts/migrate-employee-punches.js ./scripts/migrate-employee-punches.js
 COPY apps/api/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 47
+# CACHEBUST 48
 CMD ["./entrypoint.sh"]
