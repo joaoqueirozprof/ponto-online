@@ -20,6 +20,12 @@ import { TimesheetsService } from './timesheets.service';
 export class TimesheetsController {
   constructor(private readonly timesheetsService: TimesheetsService) {}
 
+  @Get('build-version')
+  @ApiOperation({ summary: 'Get build version' })
+  getBuildVersion() {
+    return { version: 'build-45-punchesByDate', timestamp: new Date().toISOString() };
+  }
+
   @Get()
   @ApiOperation({ summary: 'List timesheets' })
   listTimesheets(
