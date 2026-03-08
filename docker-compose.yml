@@ -77,6 +77,27 @@ services:
     networks:
       - ponto-network
 
+  ponto-migrate:
+    image: postgres:16-alpine
+    container_name: ponto-migrate
+    restart: "no"
+    volumes:
+      - ./scripts/migrate-employee-punches.sql:/migration.sql:ro
+    environment:
+      PGPASSWORD: "PontoSecure2026"
+    entrypoint: >
+      sh -c "
+        echo '=== Starting Employee Punch Migration ===' &&
+        psql -h ponto-db -U ponto_admin -d ponto_online -f /migration.sql 2>&1 &&
+        echo '=== Migration Complete ===' ||
+        echo '=== Migration FAILED ==='
+      "
+    depends_on:
+      ponto-db:
+        condition: service_healthy
+    networks:
+      - ponto-network
+
   ponto-web:
     build:
       context: .
