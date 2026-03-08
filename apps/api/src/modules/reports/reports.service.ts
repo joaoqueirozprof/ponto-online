@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
-interface DayCalc {
+export interface DayCalc {
   date: string;
   dayOfWeek: number;
   workedMinutes: number;
