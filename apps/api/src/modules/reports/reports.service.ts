@@ -80,7 +80,6 @@ export class ReportsService {
       where: {
         employeeId: { in: employeeIds },
         punchTime: { gte: startDate, lte: endDate },
-        status: { not: 'DELETED' as any },
       },
       orderBy: { punchTime: 'asc' },
     });
@@ -357,8 +356,8 @@ export class ReportsService {
     const allPunches = await this.prisma.normalizedPunch.findMany({
       where: {
         OR: [
-          { employee: { branchId }, punchTime: { gte: startDate, lte: endDate }, status: { not: 'DELETED' as any } },
-          { employeeId: { in: allOldIds }, punchTime: { gte: startDate, lte: endDate }, status: { not: 'DELETED' as any } },
+          { employee: { branchId }, punchTime: { gte: startDate, lte: endDate } },
+          { employeeId: { in: allOldIds }, punchTime: { gte: startDate, lte: endDate } },
         ],
       },
       orderBy: { punchTime: 'asc' },
