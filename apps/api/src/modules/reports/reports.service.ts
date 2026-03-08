@@ -514,4 +514,73 @@ export class ReportsService {
       payrollData,
     };
   }
+
+  /**
+   * One-time migration: transfer punches from old employee IDs to new updated employee IDs.
+   * Safe to call multiple times (idempotent).
+   */
+  async migrateEmployeePunches() {
+    const mapping = [
+      { oldId: 'cmmh29yp30059bz9p0zcu9ftn', newId: 'cmmh3hqb70xn6gw0wqjwfuv7y', name: 'MARIA VILANEIDE' },
+      { oldId: 'cmmh29xql0047bz9p07dyq3mp', newId: 'cmmh3hq900xn4gw0wfou371lj', name: 'MARCOS VINICIUS' },
+      { oldId: 'cmmh29zg10063bz9pu8p89ent', newId: 'cmmh3hq6z0xn2gw0wh7hlsipp', name: 'JOSENILTON BARBALHO' },
+      { oldId: 'cmmh2a08p006zbz9pgg70c6bf', newId: 'cmmh3hq4y0xn0gw0w674z4wh7', name: 'JOSE LEUDOMAR' },
+      { oldId: 'cmmh2a01g006rbz9px6efy5il', newId: 'cmmh3hq2n0xmygw0wseb0zse4', name: 'JOCELIO BEZERRA' },
+      { oldId: 'cmmh29ywl005hbz9pk4lvy25b', newId: 'cmmh3hq0i0xmwgw0wkg7izpcj', name: 'JOAO VITOR' },
+      { oldId: 'cmmh29yht0051bz9prr3pi0b1', newId: 'cmmh3hpyd0xmugw0wixtbnfeb', name: 'THIAGO PEREIRA' },
+      { oldId: 'cmmh29yun005fbz9prd50t65g', newId: 'cmmh3hpwf0xmsgw0wjufmae43', name: 'LUAN' },
+      { oldId: 'cmmh29yjl0053bz9pws1a67eg', newId: 'cmmh3hpuj0xmqgw0wtss4hmfc', name: 'FRANCISCI ISAC' },
+      { oldId: 'cmmh2a2ap0099bz9pawsa338m', newId: 'cmmh3hpso0xmogw0wj1rjpzwu', name: 'CANINDE CHAVES' },
+      { oldId: 'cmmh2a2k5009jbz9p8wzz1mkm', newId: 'cmmh3hpqt0xmmgw0wkdtx9rpd', name: 'F ARTHUR LOPES' },
+      { oldId: 'cmmh29zch005zbz9p5owtjgo1', newId: 'cmmh3hpow0xmkgw0w3ls1en7x', name: 'ANTONIO MARCOS' },
+      { oldId: 'cmmh29yli0055bz9plq51a4kf', newId: 'cmmh3hpmu0xmigw0w9urwqrpd', name: 'FRANCISCO EVERTON' },
+      { oldId: 'cmmh2a1ci0087bz9puge9tlpa', newId: 'cmmh3hpkv0xmggw0wkwjd7bqu', name: 'ERIDAN PEREIRA' },
+      { oldId: 'cmmh29zhv0065bz9p4fs1tjev', newId: 'cmmh3hpj20xmegw0wvtyour9i', name: 'DORIAN DIMAS' },
+      { oldId: 'cmmh29xbz003rbz9pb7ov8x58', newId: 'cmmh3hph00xmcgw0wobsuj8km', name: 'CICERO UBIRATAN' },
+      { oldId: 'cmmh2a0c80073bz9p67l0bxuy', newId: 'cmmh3hpf10xmagw0wtnpkpzjs', name: 'AMANDA CARVALHO' },
+    ];
+
+    const results: any[] = [];
+
+    for (const { oldId, newId, name } of mapping) {
+      const punchCount = await this.prisma.normalizedPunch.count({ where: { employeeId: oldId } });
+      const timesheetCount = await this.prisma.timesheet.count({ where: { employeeId: oldId } });
+
+      if (punchCount === 0 && timesheetCount === 0) {
+        results.push({ name, status: 'skipped', punchCount: 0, timesheetCount: 0 });
+        continue;
+      }
+
+      // Migrate punches
+      if (punchCount > 0) {
+        await this.prisma.normalizedPunch.updateMany({
+          where: { employeeId: oldId },
+          data: { employeeId: newId },
+        });
+      }
+
+      // Migrate timesheets
+      if (timesheetCount > 0) {
+        await this.prisma.timesheet.updateMany({
+          where: { employeeId: oldId },
+          data: { employeeId: newId },
+        });
+      }
+
+      // Deactivate old employee
+      await this.prisma.employee.update({
+        where: { id: oldId },
+        data: { isActive: false },
+      });
+
+      results.push({ name, status: 'migrated', punchCount, timesheetCount });
+    }
+
+    return {
+      message: 'Employee punch migration complete',
+      results,
+      totalMigrated: results.filter(r => r.status === 'migrated').length,
+      totalSkipped: results.filter(r => r.status === 'skipped').length,
+    };
+  }
 }
