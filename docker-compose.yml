@@ -43,11 +43,6 @@ services:
     restart: always
     ports:
       - "4010:4010"
-    volumes:
-      - ./apps/api/src:/app/src
-      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
-      - ./scripts:/app/scripts
-      - ./prisma:/app/prisma
     environment:
       NODE_ENV: "production"
       API_PORT: "4010"
