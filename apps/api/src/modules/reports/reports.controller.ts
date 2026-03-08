@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Param,
   UseGuards,
   Query,
@@ -17,7 +16,7 @@ import { ReportsService } from './reports.service';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
-  @Post('migrate-employee-punches')
+  @Get('migrate-employee-punches')
   @ApiOperation({ summary: 'Migrate punches from old employee IDs to new ones (one-time)' })
   migrateEmployeePunches() {
     return this.reportsService.migrateEmployeePunches();
