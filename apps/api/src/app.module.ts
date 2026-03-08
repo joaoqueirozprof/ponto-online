@@ -16,6 +16,7 @@ import { TimesheetsModule } from './modules/timesheets/timesheets.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SeedModule } from './modules/seed/seed.module';
+import { AutoSyncModule } from './modules/auto-sync/auto-sync.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { SeedModule } from './modules/seed/seed.module';
     SyncModule,
     ReportsModule,
     SeedModule,
+    AutoSyncModule,
   ],
 })
 export class AppModule {}
