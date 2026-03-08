@@ -39,8 +39,8 @@ interface Toast {
 const PUNCH_TYPE_PT: Record<string, string> = {
   ENTRY: 'Entrada',
   EXIT: 'Saída',
-  BREAK_START: 'Início Intervalo',
-  BREAK_END: 'Fim Intervalo',
+  BREAK_START: 'Saída Intervalo',
+  BREAK_END: 'Retorno Intervalo',
 };
 
 const PUNCH_STATUS_PT: Record<string, string> = {
@@ -48,6 +48,7 @@ const PUNCH_STATUS_PT: Record<string, string> = {
   ADJUSTED: 'Ajustado',
   MANUAL: 'Manual',
   DELETED: 'Excluído',
+  NORMAL: 'Normal',
 };
 
 interface PunchSummary {
@@ -58,7 +59,7 @@ interface PunchSummary {
 }
 
 export default function PunchesPage() {
-  const [activeTab, setActiveTab] = useState<'raw' | 'normalized' | 'adjustments'>('raw');
+  const [activeTab, setActiveTab] = useState<'raw' | 'normalized' | 'adjustments'>('normalized');
   const [rawPunches, setRawPunches] = useState<RawPunch[]>([]);
   const [normalizedPunches, setNormalizedPunches] = useState<NormalizedPunch[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
@@ -83,6 +84,16 @@ export default function PunchesPage() {
     reason: '',
   });
   const [submittingManual, setSubmittingManual] = useState(false);
+
+  // Edit/Adjust state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingPunch, setEditingPunch] = useState<NormalizedPunch | null>(null);
+  const [editForm, setEditForm] = useState({
+    newDate: '',
+    newTime: '',
+    reason: '',
+  });
+  const [submittingEdit, setSubmittingEdit] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
@@ -142,7 +153,6 @@ export default function PunchesPage() {
     }
     setSubmittingManual(true);
     try {
-      // Create date from local time inputs - new Date() interprets as local timezone
       const punchTime = new Date(`${manualForm.date}T${manualForm.time}:00`).toISOString();
       await apiClient.post('/punches/manual', {
         employeeId: manualForm.employeeId,
@@ -154,7 +164,6 @@ export default function PunchesPage() {
       showToast('Registro manual criado com sucesso!', 'success');
       setShowManualModal(false);
       setManualForm({ employeeId: '', date: new Date().toISOString().slice(0, 10), time: '', punchType: 'ENTRY', reason: '' });
-      // Refresh data
       if (activeTab === 'raw') fetchRawPunches();
       else if (activeTab === 'normalized') fetchNormalizedPunches();
       fetchSummary();
@@ -163,6 +172,46 @@ export default function PunchesPage() {
     } finally {
       setSubmittingManual(false);
     }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingPunch || !editForm.newDate || !editForm.newTime || !editForm.reason) {
+      showToast('Preencha todos os campos para o ajuste', 'error');
+      return;
+    }
+    setSubmittingEdit(true);
+    try {
+      const newTime = new Date(`${editForm.newDate}T${editForm.newTime}:00`).toISOString();
+      await apiClient.post(`/punches/${editingPunch.id}/adjust`, {
+        newTime,
+        reason: editForm.reason,
+        adjustedBy: 'admin',
+      });
+      showToast('Batida ajustada com sucesso!', 'success');
+      setShowEditModal(false);
+      setEditingPunch(null);
+      setEditForm({ newDate: '', newTime: '', reason: '' });
+      fetchNormalizedPunches();
+      fetchAdjustments();
+      fetchSummary();
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || 'Erro ao ajustar batida', 'error');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  const openEditModal = (punch: NormalizedPunch) => {
+    const d = new Date(punch.punchTime);
+    const brDate = d.toLocaleDateString('sv-SE', { timeZone: 'America/Fortaleza' });
+    const brTime = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', hour12: false });
+    setEditingPunch(punch);
+    setEditForm({
+      newDate: brDate,
+      newTime: brTime,
+      reason: '',
+    });
+    setShowEditModal(true);
   };
 
   const fetchEmployees = async () => {
@@ -236,20 +285,30 @@ export default function PunchesPage() {
   const formatDateTime = (date: string) => {
     if (!date) return '-';
     try {
-      return new Date(date).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      return new Date(date).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' });
     } catch {
       return '-';
     }
   };
 
-  const formatTime = (date: string) => {
+  const formatDateOnly = (date: string) => {
     if (!date) return '-';
     try {
-      return new Date(date).toLocaleString('pt-BR', {
-        timeZone: 'America/Sao_Paulo',
+      return new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });
+    } catch {
+      return '-';
+    }
+  };
+
+  const formatTimeOnly = (date: string) => {
+    if (!date) return '-';
+    try {
+      return new Date(date).toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Fortaleza',
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+        hour12: false,
       });
     } catch {
       return '-';
@@ -260,7 +319,7 @@ export default function PunchesPage() {
     const baseClasses = 'inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold';
     const label = PUNCH_STATUS_PT[status] || status;
     switch (status) {
-      case 'ORIGINAL':
+      case 'ORIGINAL': case 'NORMAL':
         return <span className={`${baseClasses} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300`}>{label}</span>;
       case 'ADJUSTED':
         return <span className={`${baseClasses} bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300`}>{label}</span>;
@@ -274,17 +333,17 @@ export default function PunchesPage() {
   };
 
   const getTypeBadge = (type: string) => {
-    const baseClasses = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold';
+    const baseClasses = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold';
     const label = PUNCH_TYPE_PT[type] || type;
     switch (type) {
       case 'ENTRY':
-        return <span className={`${baseClasses} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300`}>{label}</span>;
+        return <span className={`${baseClasses} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300`}>&#x2192; {label}</span>;
       case 'EXIT':
-        return <span className={`${baseClasses} bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300`}>{label}</span>;
+        return <span className={`${baseClasses} bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300`}>&#x2190; {label}</span>;
       case 'BREAK_START':
-        return <span className={`${baseClasses} bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300`}>{label}</span>;
+        return <span className={`${baseClasses} bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300`}>&#x23F8; {label}</span>;
       case 'BREAK_END':
-        return <span className={`${baseClasses} bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300`}>{label}</span>;
+        return <span className={`${baseClasses} bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300`}>&#x25B6; {label}</span>;
       default:
         return <span className={`${baseClasses} bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300`}>{label}</span>;
     }
@@ -310,11 +369,20 @@ export default function PunchesPage() {
       ),
     },
     {
+      key: 'date',
+      label: 'Data',
+      render: (_: any, row: RawPunch) => (
+        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
+          {formatDateOnly(row.punchTime)}
+        </div>
+      ),
+    },
+    {
       key: 'punchTime',
       label: 'Horário',
       render: (_: any, row: RawPunch) => (
-        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
-          {formatDateTime(row.punchTime)}
+        <div className="text-sm font-mono font-semibold text-indigo-700 dark:text-indigo-300">
+          {formatTimeOnly(row.punchTime)}
         </div>
       ),
     },
@@ -347,11 +415,20 @@ export default function PunchesPage() {
       ),
     },
     {
+      key: 'date',
+      label: 'Data',
+      render: (_: any, row: NormalizedPunch) => (
+        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
+          {formatDateOnly(row.punchTime)}
+        </div>
+      ),
+    },
+    {
       key: 'punchTime',
       label: 'Horário',
       render: (_: any, row: NormalizedPunch) => (
-        <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
-          {formatDateTime(row.punchTime)}
+        <div className="text-sm font-mono font-semibold text-indigo-700 dark:text-indigo-300">
+          {formatTimeOnly(row.punchTime)}
         </div>
       ),
     },
@@ -364,6 +441,22 @@ export default function PunchesPage() {
       key: 'status',
       label: 'Status',
       render: (_: any, row: NormalizedPunch) => getStatusBadge(row.status),
+    },
+    {
+      key: 'actions',
+      label: 'Ações',
+      render: (_: any, row: NormalizedPunch) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); openEditModal(row); }}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors shadow-sm"
+          title="Editar / Ajustar batida"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+          Editar
+        </button>
+      ),
     },
   ];
 
@@ -381,7 +474,7 @@ export default function PunchesPage() {
       key: 'originalTime',
       label: 'Horário Original',
       render: (_: any, row: Adjustment) => (
-        <div className="text-sm font-mono text-red-600 dark:text-red-400">
+        <div className="text-sm font-mono text-red-600 dark:text-red-400 line-through">
           {formatDateTime(row.originalTime)}
         </div>
       ),
@@ -390,7 +483,7 @@ export default function PunchesPage() {
       key: 'newTime',
       label: 'Novo Horário',
       render: (_: any, row: Adjustment) => (
-        <div className="text-sm font-mono text-emerald-600 dark:text-emerald-400">
+        <div className="text-sm font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
           {formatDateTime(row.newTime)}
         </div>
       ),
@@ -456,10 +549,10 @@ export default function PunchesPage() {
         {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Registros Hoje', value: summary.totalToday, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-            { label: 'Colaboradores Presentes', value: summary.uniqueEmployees, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-            { label: 'Entradas', value: summary.entriesCount, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-            { label: 'Saídas', value: summary.exitsCount, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+            { label: 'Registros Hoje', value: summary.totalToday, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100', icon: '📋' },
+            { label: 'Colaboradores Presentes', value: summary.uniqueEmployees, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', icon: '👥' },
+            { label: 'Entradas', value: summary.entriesCount, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', icon: '→' },
+            { label: 'Saídas', value: summary.exitsCount, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', icon: '←' },
           ].map((card) => (
             <div key={card.label} className={`${card.bg} ${card.border} border rounded-xl p-4 text-center`}>
               <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
@@ -470,11 +563,16 @@ export default function PunchesPage() {
 
         {/* Tab Navigation */}
         <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm inline-flex">
-          {(['raw', 'normalized', 'adjustments'] as const).map((tab) => {
+          {(['normalized', 'raw', 'adjustments'] as const).map((tab) => {
             const labels = {
               raw: 'Registros Brutos',
-              normalized: 'Normalizados',
+              normalized: 'Batidas',
               adjustments: 'Ajustes',
+            };
+            const icons = {
+              raw: '📟',
+              normalized: '⏱',
+              adjustments: '✏️',
             };
             return (
               <button
@@ -483,12 +581,13 @@ export default function PunchesPage() {
                   setActiveTab(tab);
                   setCurrentPage(1);
                 }}
-                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 ${
+                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
                   activeTab === tab
                     ? 'bg-indigo-600 text-white shadow-lg'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}
               >
+                <span>{icons[tab]}</span>
                 {labels[tab]}
               </button>
             );
@@ -537,40 +636,36 @@ export default function PunchesPage() {
               </select>
             </div>
 
-            {/* Start Date Filter */}
-            {(activeTab === 'raw' || activeTab === 'normalized') && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
-                    Data Inicial
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => {
-                      setStartDate(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-                  />
-                </div>
+            {/* Date Filters */}
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
+                Data Inicial
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              />
+            </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
-                    Data Final
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => {
-                      setEndDate(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-                  />
-                </div>
-              </>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
+                Data Final
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              />
+            </div>
             </div>
           </div>
         </div>
@@ -637,7 +732,6 @@ export default function PunchesPage() {
             </div>
 
             <div className="p-6 space-y-4">
-              {/* Employee */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Colaborador *</label>
                 <select
@@ -652,37 +746,27 @@ export default function PunchesPage() {
                 </select>
               </div>
 
-              {/* Date and Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Data *</label>
-                  <input
-                    type="date"
-                    value={manualForm.date}
-                    onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                  <input type="date" value={manualForm.date} onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Horário *</label>
-                  <input
-                    type="time"
-                    value={manualForm.time}
-                    onChange={(e) => setManualForm({ ...manualForm, time: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                  <input type="time" value={manualForm.time} onChange={(e) => setManualForm({ ...manualForm, time: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
               </div>
 
-              {/* Punch Type */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Tipo de Registro *</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { value: 'ENTRY', label: 'Entrada', icon: '→', activeClass: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
                     { value: 'EXIT', label: 'Saída', icon: '←', activeClass: 'border-red-500 bg-red-50 text-red-700' },
-                    { value: 'BREAK_START', label: 'Início Intervalo', icon: '⏸', activeClass: 'border-amber-500 bg-amber-50 text-amber-700' },
-                    { value: 'BREAK_END', label: 'Fim Intervalo', icon: '▶', activeClass: 'border-blue-500 bg-blue-50 text-blue-700' },
+                    { value: 'BREAK_START', label: 'Saída Intervalo', icon: '⏸', activeClass: 'border-amber-500 bg-amber-50 text-amber-700' },
+                    { value: 'BREAK_END', label: 'Retorno Intervalo', icon: '▶', activeClass: 'border-blue-500 bg-blue-50 text-blue-700' },
                   ].map((type) => (
                     <button
                       key={type.value}
@@ -701,7 +785,6 @@ export default function PunchesPage() {
                 </div>
               </div>
 
-              {/* Reason */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Motivo / Justificativa *</label>
                 <textarea
@@ -715,18 +798,86 @@ export default function PunchesPage() {
             </div>
 
             <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end">
-              <button
-                onClick={() => setShowManualModal(false)}
-                className="px-5 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg font-medium text-sm transition-colors"
-              >
+              <button onClick={() => setShowManualModal(false)} className="px-5 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg font-medium text-sm transition-colors">
                 Cancelar
               </button>
-              <button
-                onClick={handleManualSubmit}
-                disabled={submittingManual}
-                className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-              >
+              <button onClick={handleManualSubmit} disabled={submittingManual}
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
                 {submittingManual ? 'Salvando...' : 'Registrar Ponto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit/Adjust Punch Modal */}
+      {showEditModal && editingPunch && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowEditModal(false)}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Ajustar Batida</h2>
+                  <p className="text-sm text-slate-500 mt-1">Corrija o horário de uma batida existente</p>
+                </div>
+                <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Current Info */}
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 space-y-2">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase">Registro Atual</h3>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-900 dark:text-white">{editingPunch.employee?.name}</span>
+                  {getTypeBadge(editingPunch.punchType)}
+                </div>
+                <div className="text-sm font-mono text-slate-600 dark:text-slate-300">
+                  Horário atual: <strong className="text-red-600">{formatDateTime(editingPunch.punchTime)}</strong>
+                </div>
+              </div>
+
+              {/* New Time */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Novo Horário *</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Data</label>
+                    <input type="date" value={editForm.newDate} onChange={(e) => setEditForm({ ...editForm, newDate: e.target.value })}
+                      className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Hora</label>
+                    <input type="time" value={editForm.newTime} onChange={(e) => setEditForm({ ...editForm, newTime: e.target.value })}
+                      className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Motivo do Ajuste *</label>
+                <textarea
+                  value={editForm.reason}
+                  onChange={(e) => setEditForm({ ...editForm, reason: e.target.value })}
+                  placeholder="Ex: Horário registrado incorretamente, esqueceu de bater..."
+                  rows={3}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end">
+              <button onClick={() => setShowEditModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">
+                Cancelar
+              </button>
+              <button onClick={handleEditSubmit} disabled={submittingEdit}
+                className="px-5 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
+                {submittingEdit ? 'Salvando...' : 'Salvar Ajuste'}
               </button>
             </div>
           </div>

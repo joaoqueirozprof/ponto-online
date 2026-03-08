@@ -36,8 +36,11 @@ export class PunchesController {
     @Query('employeeId') employeeId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 100,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.punchesService.getNormalizedPunches(employeeId, skip, take);
+    return this.punchesService.getNormalizedPunches(employeeId, skip, take, search, startDate, endDate);
   }
 
   @Post('manual')

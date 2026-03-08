@@ -45,10 +45,19 @@ export class PunchesService {
     return { data, total, skip, take };
   }
 
-  async getNormalizedPunches(employeeId?: string, skip: any = 0, take: any = 100) {
+  async getNormalizedPunches(employeeId?: string, skip: any = 0, take: any = 100, search?: string, startDate?: string, endDate?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 100;
-    const where = employeeId ? { employeeId } : {};
+    const where: any = {};
+    if (employeeId) where.employeeId = employeeId;
+    if (search) {
+      where.employee = { name: { contains: search, mode: 'insensitive' } };
+    }
+    if (startDate || endDate) {
+      where.punchTime = {};
+      if (startDate) where.punchTime.gte = new Date(startDate + 'T00:00:00Z');
+      if (endDate) where.punchTime.lte = new Date(endDate + 'T23:59:59Z');
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.normalizedPunch.findMany({
