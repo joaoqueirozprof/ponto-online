@@ -30,18 +30,22 @@ interface Timesheet {
   employee: TimesheetEmployee;
 }
 
+interface PunchRecord {
+  time: string;
+  type: string;
+  status: string;
+}
+
 interface TimesheetDay {
   id: string;
   date: string;
   dayOfWeek: number;
-  firstEntry: string | null;
-  lastExit: string | null;
-  breakStart: string | null;
-  breakEnd: string | null;
   workedMinutes: number;
   overtimeMinutes: number;
   lateMinutes: number;
   absenceMinutes: number;
+  breakMinutes: number;
+  punchCount: number;
   status: string;
   scheduleEntry: {
     startTime: string;
@@ -64,6 +68,7 @@ interface TimesheetDetail {
   totalBalanceMinutes: number;
   employee: { id: string; name: string; cpf: string };
   timesheetDays: TimesheetDay[];
+  punchesByDate?: Record<string, PunchRecord[]>;
 }
 
 interface Branch {
@@ -109,10 +114,35 @@ const formatTime = (dateStr: string | null): string => {
   if (!dateStr) return '--:--';
   try {
     const d = new Date(dateStr);
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return d.toLocaleTimeString('pt-BR', {
+      timeZone: 'America/Fortaleza',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   } catch {
     return '--:--';
   }
+};
+
+const getDayPunchTimes = (
+  dateStr: string,
+  punchesByDate?: Record<string, PunchRecord[]>
+): { entry: string; exit: string; allPunches: string } => {
+  if (!punchesByDate) return { entry: '--:--', exit: '--:--', allPunches: '-' };
+  const dateKey = dateStr?.split('T')[0] || '';
+  const punches = punchesByDate[dateKey];
+  if (!punches || punches.length === 0) return { entry: '--:--', exit: '--:--', allPunches: '-' };
+
+  const entryPunch = punches.find(p => p.type === 'ENTRY');
+  const exitPunch = [...punches].reverse().find(p => p.type === 'EXIT');
+  const allTimes = punches.map(p => formatTime(p.time)).join(' | ');
+
+  return {
+    entry: entryPunch ? formatTime(entryPunch.time) : '--:--',
+    exit: exitPunch ? formatTime(exitPunch.time) : '--:--',
+    allPunches: allTimes,
+  };
 };
 
 const formatDate = (dateStr: string): string => {
@@ -328,13 +358,14 @@ export default function TimesheetsPage() {
   };
 
   const getDayStatus = (day: TimesheetDay) => {
-    const d = new Date(day.date);
+    const datePart = day.date?.includes('T') ? day.date.split('T')[0] : day.date;
+    const d = new Date(datePart + 'T12:00:00');
     const dow = d.getDay();
     if (day.status === 'HOLIDAY') return { label: 'Feriado', color: 'text-purple-600 bg-purple-50' };
     if (day.status === 'ABSENCE') return { label: 'Falta', color: 'text-red-600 bg-red-50' };
     if (day.status === 'DAY_OFF' || (day.scheduleEntry && !day.scheduleEntry.isWorkDay)) return { label: 'Folga', color: 'text-slate-400 bg-slate-50' };
-    if (dow === 0 && !day.firstEntry) return { label: 'Folga', color: 'text-slate-400 bg-slate-50' };
-    if (day.firstEntry) return { label: 'Presente', color: 'text-emerald-600 bg-emerald-50' };
+    if (dow === 0 && (day.punchCount || 0) === 0) return { label: 'Folga', color: 'text-slate-400 bg-slate-50' };
+    if ((day.punchCount || 0) > 0 || day.workedMinutes > 0) return { label: 'Presente', color: 'text-emerald-600 bg-emerald-50' };
     // Future date
     const today = new Date();
     if (d > today) return { label: '-', color: 'text-slate-300 bg-white' };
@@ -660,34 +691,45 @@ export default function TimesheetsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Data</th>
-                    <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Dia</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Entrada</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Saída</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Trab.</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Extras</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Atraso</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600 uppercase">Status</th>
+                    <th className="text-left px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Data</th>
+                    <th className="text-left px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Dia</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Entrada</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Saída Int.</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Retorno</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Saída</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Trab.</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Extras</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Atraso</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {timesheetDetail.timesheetDays && timesheetDetail.timesheetDays.length > 0 ? (
                     timesheetDetail.timesheetDays.map((day) => {
-                      const d = new Date(day.date);
+                      const datePart = day.date?.includes('T') ? day.date.split('T')[0] : day.date;
+                      const d = new Date(datePart + 'T12:00:00');
                       const dayInfo = getDayStatus(day);
                       const isSunday = d.getDay() === 0;
+                      // Get punch times from punchesByDate
+                      const dayPunches = timesheetDetail.punchesByDate?.[datePart] || [];
+                      const entryPunch = dayPunches.find(p => p.type === 'ENTRY');
+                      const breakStartPunch = dayPunches.find(p => p.type === 'BREAK_START');
+                      const breakEndPunch = dayPunches.find(p => p.type === 'BREAK_END');
+                      const exitPunch = [...dayPunches].reverse().find(p => p.type === 'EXIT');
                       return (
                         <tr key={day.id} className={`border-b border-slate-100 ${isSunday ? 'bg-red-50/30' : 'hover:bg-slate-50'}`}>
-                          <td className="px-3 py-2 font-mono text-slate-700">{formatDate(day.date)}</td>
-                          <td className={`px-3 py-2 ${isSunday ? 'text-red-500 font-semibold' : 'text-slate-600'}`}>
+                          <td className="px-2 py-2 font-mono text-slate-700">{formatDate(day.date)}</td>
+                          <td className={`px-2 py-2 ${isSunday ? 'text-red-500 font-semibold' : 'text-slate-600'}`}>
                             {DAY_NAMES_SHORT[d.getDay()]}
                           </td>
-                          <td className="px-3 py-2 text-center font-mono text-slate-700">{formatTime(day.firstEntry)}</td>
-                          <td className="px-3 py-2 text-center font-mono text-slate-700">{formatTime(day.lastExit)}</td>
-                          <td className="px-3 py-2 text-center font-mono font-medium text-slate-700">{day.workedMinutes > 0 ? formatHHMM(day.workedMinutes) : '-'}</td>
-                          <td className="px-3 py-2 text-center font-mono text-emerald-600">{day.overtimeMinutes > 0 ? formatHHMM(day.overtimeMinutes) : '-'}</td>
-                          <td className="px-3 py-2 text-center font-mono text-amber-600">{day.lateMinutes > 0 ? formatHHMM(day.lateMinutes) : '-'}</td>
-                          <td className="px-3 py-2 text-center">
+                          <td className="px-2 py-2 text-center font-mono text-emerald-700 text-xs">{entryPunch ? formatTime(entryPunch.time) : '--:--'}</td>
+                          <td className="px-2 py-2 text-center font-mono text-amber-700 text-xs">{breakStartPunch ? formatTime(breakStartPunch.time) : '--:--'}</td>
+                          <td className="px-2 py-2 text-center font-mono text-blue-700 text-xs">{breakEndPunch ? formatTime(breakEndPunch.time) : '--:--'}</td>
+                          <td className="px-2 py-2 text-center font-mono text-red-700 text-xs">{exitPunch ? formatTime(exitPunch.time) : '--:--'}</td>
+                          <td className="px-2 py-2 text-center font-mono font-medium text-slate-700">{day.workedMinutes > 0 ? formatHHMM(day.workedMinutes) : '-'}</td>
+                          <td className="px-2 py-2 text-center font-mono text-emerald-600">{day.overtimeMinutes > 0 ? formatHHMM(day.overtimeMinutes) : '-'}</td>
+                          <td className="px-2 py-2 text-center font-mono text-amber-600">{day.lateMinutes > 0 ? formatHHMM(day.lateMinutes) : '-'}</td>
+                          <td className="px-2 py-2 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${dayInfo.color}`}>
                               {dayInfo.label}
                             </span>
@@ -697,7 +739,7 @@ export default function TimesheetsPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-400">
+                      <td colSpan={10} className="text-center py-8 text-slate-400">
                         Nenhum registro encontrado para este período.
                         <br />
                         <span className="text-xs">Os registros diários são gerados automaticamente quando as batidas são processadas.</span>

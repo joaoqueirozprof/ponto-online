@@ -6,6 +6,9 @@ export class TimesheetsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getTimesheet(employeeId: string, month: number, year: number) {
+    month = Number(month);
+    year = Number(year);
+
     let timesheet: any = await this.prisma.timesheet.findUnique({
       where: {
         employeeId_month_year: {
@@ -31,7 +34,39 @@ export class TimesheetsService {
       timesheet = await this.createEmptyTimesheet(employeeId, month, year);
     }
 
-    return timesheet;
+    // Fetch punches for the month to include entry/exit times per day
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    const monthPunches = await this.prisma.normalizedPunch.findMany({
+      where: {
+        employeeId,
+        punchTime: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      orderBy: { punchTime: 'asc' },
+    });
+
+    // Group punches by date
+    const punchesByDate: Record<string, Array<{ time: string; type: string; status: string }>> = {};
+    for (const punch of monthPunches) {
+      const dateKey = punch.punchTime.toISOString().split('T')[0];
+      if (!punchesByDate[dateKey]) {
+        punchesByDate[dateKey] = [];
+      }
+      punchesByDate[dateKey].push({
+        time: punch.punchTime.toISOString(),
+        type: punch.punchType,
+        status: punch.status,
+      });
+    }
+
+    return {
+      ...timesheet,
+      punchesByDate,
+    };
   }
 
   async createEmptyTimesheet(employeeId: string, month: number, year: number) {

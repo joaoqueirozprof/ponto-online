@@ -165,7 +165,13 @@ const getMonthName = (month: number): string => MONTHS[(month || 1) - 1]?.label 
 const formatPunchTime = (isoTime: string): string => {
   try {
     const d = new Date(isoTime);
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    // Use America/Fortaleza (BRT UTC-3) timezone for display
+    return d.toLocaleTimeString('pt-BR', {
+      timeZone: 'America/Fortaleza',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   } catch {
     return '--:--';
   }
@@ -409,12 +415,27 @@ export default function ReportsPage() {
     }
   };
 
-  const getDayPunches = (dateString: string, punchesByDate?: Record<string, PunchRecord[]>): string => {
-    if (!punchesByDate) return '-';
+  const getDayPunchesDetail = (dateString: string, punchesByDate?: Record<string, PunchRecord[]>): {
+    entry: string; breakStart: string; breakEnd: string; exit: string; all: string;
+  } => {
+    const empty = { entry: '-', breakStart: '-', breakEnd: '-', exit: '-', all: '-' };
+    if (!punchesByDate) return empty;
     const dateKey = dateString?.split('T')[0] || '';
     const punches = punchesByDate[dateKey];
-    if (!punches || punches.length === 0) return '-';
-    return punches.map((p) => formatPunchTime(p.time)).join(' | ');
+    if (!punches || punches.length === 0) return empty;
+
+    const entryP = punches.find(p => p.type === 'ENTRY');
+    const breakStartP = punches.find(p => p.type === 'BREAK_START');
+    const breakEndP = punches.find(p => p.type === 'BREAK_END');
+    const exitP = [...punches].reverse().find(p => p.type === 'EXIT');
+
+    return {
+      entry: entryP ? formatPunchTime(entryP.time) : '-',
+      breakStart: breakStartP ? formatPunchTime(breakStartP.time) : '-',
+      breakEnd: breakEndP ? formatPunchTime(breakEndP.time) : '-',
+      exit: exitP ? formatPunchTime(exitP.time) : '-',
+      all: punches.map((p) => formatPunchTime(p.time)).join(' | '),
+    };
   };
 
   return (
@@ -565,35 +586,40 @@ export default function ReportsPage() {
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="bg-slate-50">
-                              <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Data</th>
-                              <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Dia</th>
-                              <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Batidas</th>
-                              <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Trabalhado</th>
-                              <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Extra</th>
-                              <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Noturno</th>
-                              <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Atraso</th>
-                              <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Falta</th>
-                              <th className="px-3 py-2.5 text-center font-semibold text-slate-500">Status</th>
+                              <th className="px-2 py-2.5 text-left font-semibold text-slate-500">Data</th>
+                              <th className="px-2 py-2.5 text-left font-semibold text-slate-500">Dia</th>
+                              <th className="px-2 py-2.5 text-center font-semibold text-slate-500">Entrada</th>
+                              <th className="px-2 py-2.5 text-center font-semibold text-slate-500">Saída Int.</th>
+                              <th className="px-2 py-2.5 text-center font-semibold text-slate-500">Retorno</th>
+                              <th className="px-2 py-2.5 text-center font-semibold text-slate-500">Saída</th>
+                              <th className="px-2 py-2.5 text-right font-semibold text-slate-500">Trabalhado</th>
+                              <th className="px-2 py-2.5 text-right font-semibold text-slate-500">Extra</th>
+                              <th className="px-2 py-2.5 text-right font-semibold text-slate-500">Noturno</th>
+                              <th className="px-2 py-2.5 text-right font-semibold text-slate-500">Atraso</th>
+                              <th className="px-2 py-2.5 text-right font-semibold text-slate-500">Falta</th>
+                              <th className="px-2 py-2.5 text-center font-semibold text-slate-500">Status</th>
                             </tr>
                           </thead>
                           <tbody>
                             {employeeData.timesheet.timesheetDays.map((day, idx) => {
                               const isSunday = getDayName(day.date) === 'Domingo';
+                              const punches = getDayPunchesDetail(day.date, employeeData.punchesByDate);
                               return (
                                 <tr key={idx} className={`${getDayRowClass(day.status, idx)} border-b border-slate-100 hover:bg-slate-50 transition`}>
-                                  <td className="px-3 py-2 font-mono text-slate-700">{formatBrazilianDate(day.date)}</td>
-                                  <td className={`px-3 py-2 ${isSunday ? 'text-red-500 font-semibold' : 'text-slate-600'}`}>
+                                  <td className="px-2 py-2 font-mono text-slate-700">{formatBrazilianDate(day.date)}</td>
+                                  <td className={`px-2 py-2 ${isSunday ? 'text-red-500 font-semibold' : 'text-slate-600'}`}>
                                     {getDayName(day.date)}
                                   </td>
-                                  <td className="px-3 py-2 text-slate-600 font-mono text-[11px]">
-                                    {getDayPunches(day.date, employeeData.punchesByDate)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-slate-900 font-mono">{formatHHMM(day.workedMinutes)}</td>
-                                  <td className="px-3 py-2 text-right text-emerald-600 font-mono">{safeNumber(day.overtimeMinutes) > 0 ? formatHHMM(day.overtimeMinutes) : '-'}</td>
-                                  <td className="px-3 py-2 text-right text-purple-600 font-mono">{safeNumber(day.nightMinutes) > 0 ? formatHHMM(day.nightMinutes) : '-'}</td>
-                                  <td className="px-3 py-2 text-right text-amber-600 font-mono">{safeNumber(day.lateMinutes) > 0 ? formatHHMM(day.lateMinutes) : '-'}</td>
-                                  <td className="px-3 py-2 text-right text-red-600 font-mono">{safeNumber(day.absenceMinutes) > 0 ? formatHHMM(day.absenceMinutes) : '-'}</td>
-                                  <td className="px-3 py-2 text-center">
+                                  <td className="px-2 py-2 text-center font-mono text-emerald-700">{punches.entry}</td>
+                                  <td className="px-2 py-2 text-center font-mono text-amber-700">{punches.breakStart}</td>
+                                  <td className="px-2 py-2 text-center font-mono text-blue-700">{punches.breakEnd}</td>
+                                  <td className="px-2 py-2 text-center font-mono text-red-700">{punches.exit}</td>
+                                  <td className="px-2 py-2 text-right text-slate-900 font-mono">{formatHHMM(day.workedMinutes)}</td>
+                                  <td className="px-2 py-2 text-right text-emerald-600 font-mono">{safeNumber(day.overtimeMinutes) > 0 ? formatHHMM(day.overtimeMinutes) : '-'}</td>
+                                  <td className="px-2 py-2 text-right text-purple-600 font-mono">{safeNumber(day.nightMinutes) > 0 ? formatHHMM(day.nightMinutes) : '-'}</td>
+                                  <td className="px-2 py-2 text-right text-amber-600 font-mono">{safeNumber(day.lateMinutes) > 0 ? formatHHMM(day.lateMinutes) : '-'}</td>
+                                  <td className="px-2 py-2 text-right text-red-600 font-mono">{safeNumber(day.absenceMinutes) > 0 ? formatHHMM(day.absenceMinutes) : '-'}</td>
+                                  <td className="px-2 py-2 text-center">
                                     <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadge(day.status)}`}>
                                       {STATUS_PT[day.status] || day.status}
                                     </span>
@@ -603,13 +629,13 @@ export default function ReportsPage() {
                             })}
                             {/* Totals Row */}
                             <tr className="bg-slate-100 border-t-2 border-indigo-300 font-bold">
-                              <td colSpan={3} className="px-3 py-3 text-right text-slate-700 uppercase text-[10px] tracking-wider">Totais do Período</td>
-                              <td className="px-3 py-3 text-right text-slate-900 font-mono">{formatHHMM(employeeData.timesheet.totalWorkedMinutes)}</td>
-                              <td className="px-3 py-3 text-right text-emerald-600 font-mono">{formatHHMM(employeeData.timesheet.totalOvertimeMinutes)}</td>
-                              <td className="px-3 py-3 text-right text-purple-600 font-mono">{formatHHMM(employeeData.timesheet.totalNightMinutes)}</td>
-                              <td className="px-3 py-3 text-right text-amber-600 font-mono">{formatHHMM(employeeData.timesheet.totalLateMinutes)}</td>
-                              <td className="px-3 py-3 text-right text-red-600 font-mono">{formatHHMM(employeeData.timesheet.totalAbsenceMinutes)}</td>
-                              <td className="px-3 py-3"></td>
+                              <td colSpan={6} className="px-2 py-3 text-right text-slate-700 uppercase text-[10px] tracking-wider">Totais do Período</td>
+                              <td className="px-2 py-3 text-right text-slate-900 font-mono">{formatHHMM(employeeData.timesheet.totalWorkedMinutes)}</td>
+                              <td className="px-2 py-3 text-right text-emerald-600 font-mono">{formatHHMM(employeeData.timesheet.totalOvertimeMinutes)}</td>
+                              <td className="px-2 py-3 text-right text-purple-600 font-mono">{formatHHMM(employeeData.timesheet.totalNightMinutes)}</td>
+                              <td className="px-2 py-3 text-right text-amber-600 font-mono">{formatHHMM(employeeData.timesheet.totalLateMinutes)}</td>
+                              <td className="px-2 py-3 text-right text-red-600 font-mono">{formatHHMM(employeeData.timesheet.totalAbsenceMinutes)}</td>
+                              <td className="px-2 py-3"></td>
                             </tr>
                           </tbody>
                         </table>
