@@ -65,7 +65,7 @@ export class AutoSyncService {
         try {
           const result = await this.syncDevice(device.id);
           results.push({ deviceId: device.id, name: device.name, ...result });
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`Failed to sync device ${device.name}: ${error.message}`);
           results.push({
             deviceId: device.id,
@@ -273,7 +273,7 @@ export class AutoSyncService {
         }
 
         newRecords++;
-      } catch (error) {
+      } catch (error: any) {
         errors++;
         this.logger.error(`Error processing AFD record: ${error.message}`);
       }
@@ -325,7 +325,7 @@ export class AutoSyncService {
 
       try {
         await this.calculateTimesheet(employeeId, month, year);
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed to recalculate timesheet for ${employeeId} ${month}/${year}: ${error.message}`);
       }
     }
@@ -353,7 +353,7 @@ export class AutoSyncService {
       try {
         await this.calculateTimesheet(emp.id, month, year);
         processed++;
-      } catch (error) {
+      } catch (error: any) {
         errors++;
         this.logger.error(`Failed to recalculate for ${emp.name}: ${error.message}`);
       }
@@ -546,7 +546,7 @@ export class AutoSyncService {
       try {
         const result = await this.syncEmployeesForDevice(device.id);
         results.push({ deviceId: device.id, name: device.name, ...result });
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed to sync employees for device ${device.name}: ${error.message}`);
         results.push({
           deviceId: device.id,
@@ -614,7 +614,7 @@ export class AutoSyncService {
         await this.controlId.createUsers(deviceId, toCreateOnDevice);
         pushedToDevice = toCreateOnDevice.length;
         this.logger.log(`Pushed ${pushedToDevice} employees to device ${device.name}`);
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed to push employees to device: ${error.message}`);
       }
     }
@@ -639,7 +639,7 @@ export class AutoSyncService {
           });
           pulledFromDevice++;
           this.logger.log(`Pulled new employee from device: ${devUser.name} (${devUser.registration})`);
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`Failed to create employee from device: ${error.message}`);
         }
       }

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import * as http from 'http';
 
 interface ControlIdSession {
   deviceId: string;
@@ -26,6 +27,45 @@ interface ControlIdUser {
   end_time?: number;
 }
 
+/**
+ * Helper to make HTTP POST requests using Node's http module
+ */
+function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status: number; data: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const postData = body ? JSON.stringify(body) : '';
+
+    const options: http.RequestOptions = {
+      hostname: parsed.hostname,
+      port: parsed.port || 80,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+      timeout: timeoutMs,
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        resolve({ status: res.statusCode || 0, data });
+      });
+    });
+
+    req.on('error', (err) => reject(err));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Request timeout after ${timeoutMs}ms`));
+    });
+
+    if (postData) req.write(postData);
+    req.end();
+  });
+}
+
 @Injectable()
 export class ControlIdService {
   private readonly logger = new Logger(ControlIdService.name);
@@ -48,21 +88,16 @@ export class ControlIdService {
     const baseUrl = `http://${device.ipAddress}:${device.port || 80}`;
 
     try {
-      const response = await fetch(`${baseUrl}/login.fcgi`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          login: device.login || 'admin',
-          password: device.encryptedPassword || 'admin',
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
+      const result = await httpPost(`${baseUrl}/login.fcgi`, {
+        login: device.login || 'admin',
+        password: device.encryptedPassword || 'admin',
+      }, 10000);
 
-      if (!response.ok) {
-        throw new Error(`Login failed with status ${response.status}`);
+      if (result.status !== 200) {
+        throw new Error(`Login failed with status ${result.status}`);
       }
 
-      const data = await response.json();
+      const data = JSON.parse(result.data);
 
       if (!data.session) {
         throw new Error('No session token received from device');
@@ -78,7 +113,7 @@ export class ControlIdService {
 
       this.logger.log(`Successfully logged into device ${device.name} (${device.ipAddress})`);
       return data.session;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to login to device ${device.name} (${device.ipAddress}): ${error.message}`);
       throw error;
     }
@@ -107,49 +142,30 @@ export class ControlIdService {
       : `${session.baseUrl}/${endpoint}?session=${session.session}`;
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30000),
-      });
+      const result = await httpPost(url, body);
 
-      if (!response.ok) {
+      if (result.status === 401 || result.status === 403) {
         // Session might have expired, retry with new login
-        if (response.status === 401 || response.status === 403) {
-          this.sessions.delete(deviceId);
-          const newSession = await this.getSession(deviceId);
-          const retryUrl = queryParams
-            ? `${newSession.baseUrl}/${endpoint}?session=${newSession.session}&${queryParams}`
-            : `${newSession.baseUrl}/${endpoint}?session=${newSession.session}`;
+        this.sessions.delete(deviceId);
+        const newSession = await this.getSession(deviceId);
+        const retryUrl = queryParams
+          ? `${newSession.baseUrl}/${endpoint}?session=${newSession.session}&${queryParams}`
+          : `${newSession.baseUrl}/${endpoint}?session=${newSession.session}`;
 
-          const retryResponse = await fetch(retryUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: body ? JSON.stringify(body) : undefined,
-            signal: AbortSignal.timeout(30000),
-          });
-
-          if (!retryResponse.ok) {
-            throw new Error(`Request failed after retry: ${retryResponse.status}`);
-          }
-
-          const contentType = retryResponse.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            return await retryResponse.json();
-          }
-          return await retryResponse.text();
+        const retryResult = await httpPost(retryUrl, body);
+        if (retryResult.status !== 200) {
+          throw new Error(`Request failed after retry: ${retryResult.status}`);
         }
 
-        throw new Error(`Request to ${endpoint} failed: ${response.status}`);
+        try { return JSON.parse(retryResult.data); } catch { return retryResult.data; }
       }
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        return await response.json();
+      if (result.status !== 200) {
+        throw new Error(`Request to ${endpoint} failed: ${result.status}`);
       }
-      return await response.text();
-    } catch (error) {
+
+      try { return JSON.parse(result.data); } catch { return result.data; }
+    } catch (error: any) {
       this.logger.error(`Request to device ${deviceId} endpoint ${endpoint} failed: ${error.message}`);
       throw error;
     }
@@ -157,7 +173,6 @@ export class ControlIdService {
 
   /**
    * Export AFD (Arquivo Fonte de Dados) from device
-   * Returns raw AFD text with all punch records
    */
   async exportAfd(deviceId: string, initialDate?: { day: number; month: number; year: number }, initialNsr?: number): Promise<string> {
     const body: any = {};
@@ -316,18 +331,13 @@ export class ControlIdService {
 
       if (!device) return false;
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const result = await httpPost(
+        `http://${device.ipAddress}:${device.port || 80}/login.fcgi`,
+        { login: device.login || 'admin', password: device.encryptedPassword || 'admin' },
+        5000,
+      );
 
-      const response = await fetch(`http://${device.ipAddress}:${device.port || 80}/login.fcgi`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login: device.login || 'admin', password: device.encryptedPassword || 'admin' }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-      return response.ok;
+      return result.status === 200;
     } catch {
       return false;
     }
