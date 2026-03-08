@@ -2,14 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as http from 'http';
 
-interface ControlIdSession {
+export interface ControlIdSession {
   deviceId: string;
   session: string;
   baseUrl: string;
   expiresAt: number;
 }
 
-interface AfdRecord {
+export interface AfdRecord {
   nsr: string;
   type: string;
   date: string;
@@ -18,7 +18,7 @@ interface AfdRecord {
   raw: string;
 }
 
-interface ControlIdUser {
+export interface ControlIdUser {
   id: number;
   registration: string;
   name: string;
