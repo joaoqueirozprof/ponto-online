@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-ARG CACHEBUST=53
+ARG CACHEBUST=54
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Force rebuild - build 41
-RUN echo "build-53-dual-id-fix"
+RUN echo "build-54-debug"
 
 # Copy config and source
 COPY apps/api/tsconfig.json ./tsconfig.json
@@ -36,5 +36,5 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 4010
 
-# CACHEBUST 53
+# CACHEBUST 54
 CMD ["./entrypoint.sh"]

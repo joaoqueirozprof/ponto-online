@@ -326,6 +326,8 @@ export class ReportsService {
       daysWorked: calc.days.filter(d => d.workedMinutes > 0).length,
       daysAbsent: calc.days.filter(d => d.status === 'ABSENCE').length,
       daysIncomplete: calc.days.filter(d => d.status === 'INCOMPLETE').length,
+      _build: 'v53-dual-id',
+      _resolvedIds: OLD_ID_MAP[employeeId] ? [employeeId, OLD_ID_MAP[employeeId]] : [employeeId],
     };
   }
 
