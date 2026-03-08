@@ -2,7 +2,7 @@
 
 import DataTable from '@/components/DataTable';
 import { apiClient } from '@/lib/api';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 
 interface RawPunch {
   id: string;
@@ -36,6 +36,18 @@ interface Toast {
   message: string;
 }
 
+interface GroupedPunch {
+  key: string;
+  employeeName: string;
+  employeeId: string;
+  date: string;
+  dayOfWeek: string;
+  entry: NormalizedPunch | null;
+  breakStart: NormalizedPunch | null;
+  breakEnd: NormalizedPunch | null;
+  exit: NormalizedPunch | null;
+}
+
 const PUNCH_TYPE_PT: Record<string, string> = {
   ENTRY: 'Entrada',
   EXIT: 'Saída',
@@ -51,6 +63,8 @@ const PUNCH_STATUS_PT: Record<string, string> = {
   NORMAL: 'Normal',
 };
 
+const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
 interface PunchSummary {
   totalToday: number;
   uniqueEmployees: number;
@@ -60,13 +74,16 @@ interface PunchSummary {
 
 export default function PunchesPage() {
   const [activeTab, setActiveTab] = useState<'raw' | 'normalized' | 'adjustments'>('normalized');
+  const [viewMode, setViewMode] = useState<'grouped' | 'individual'>('grouped');
   const [rawPunches, setRawPunches] = useState<RawPunch[]>([]);
   const [normalizedPunches, setNormalizedPunches] = useState<NormalizedPunch[]>([]);
+  const [allNormalizedForGrouping, setAllNormalizedForGrouping] = useState<NormalizedPunch[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const pageSize = 15;
+  const groupedPageSize = 20;
   const [filterEmployee, setFilterEmployee] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -84,6 +101,7 @@ export default function PunchesPage() {
     reason: '',
   });
   const [submittingManual, setSubmittingManual] = useState(false);
+  const [groupedPage, setGroupedPage] = useState(1);
 
   // Edit/Adjust state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -98,6 +116,12 @@ export default function PunchesPage() {
   useEffect(() => {
     fetchEmployees();
     fetchSummary();
+    // Default: set date range to last 7 days for grouped view
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    if (!startDate) setStartDate(weekAgo.toISOString().slice(0, 10));
+    if (!endDate) setEndDate(today.toISOString().slice(0, 10));
   }, []);
 
   const fetchSummary = async () => {
@@ -128,15 +152,29 @@ export default function PunchesPage() {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
       setCurrentPage(1);
+      setGroupedPage(1);
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
   useEffect(() => {
     if (activeTab === 'raw') fetchRawPunches();
-    else if (activeTab === 'normalized') fetchNormalizedPunches();
+    else if (activeTab === 'normalized') {
+      if (viewMode === 'individual') {
+        fetchNormalizedPunches();
+      } else {
+        fetchGroupedPunches();
+      }
+    }
     else fetchAdjustments();
-  }, [activeTab, currentPage, filterEmployee, startDate, endDate, debouncedSearch]);
+  }, [activeTab, currentPage, filterEmployee, startDate, endDate, debouncedSearch, viewMode]);
+
+  // Re-fetch grouped when grouped page changes
+  useEffect(() => {
+    if (activeTab === 'normalized' && viewMode === 'grouped') {
+      // No need to re-fetch, pagination is client-side on allNormalizedForGrouping
+    }
+  }, [groupedPage]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -165,7 +203,10 @@ export default function PunchesPage() {
       setShowManualModal(false);
       setManualForm({ employeeId: '', date: new Date().toISOString().slice(0, 10), time: '', punchType: 'ENTRY', reason: '' });
       if (activeTab === 'raw') fetchRawPunches();
-      else if (activeTab === 'normalized') fetchNormalizedPunches();
+      else if (activeTab === 'normalized') {
+        if (viewMode === 'grouped') fetchGroupedPunches();
+        else fetchNormalizedPunches();
+      }
       fetchSummary();
     } catch (error: any) {
       showToast(error?.response?.data?.message || 'Erro ao criar registro manual', 'error');
@@ -191,7 +232,8 @@ export default function PunchesPage() {
       setShowEditModal(false);
       setEditingPunch(null);
       setEditForm({ newDate: '', newTime: '', reason: '' });
-      fetchNormalizedPunches();
+      if (viewMode === 'grouped') fetchGroupedPunches();
+      else fetchNormalizedPunches();
       fetchAdjustments();
       fetchSummary();
     } catch (error: any) {
@@ -264,6 +306,83 @@ export default function PunchesPage() {
     }
   };
 
+  const fetchGroupedPunches = async () => {
+    try {
+      setLoading(true);
+      // Fetch a larger batch for grouping (all punches in date range)
+      const params: any = { skip: 0, take: 5000 };
+      if (filterEmployee) params.employeeId = filterEmployee;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      if (debouncedSearch) params.search = debouncedSearch;
+      const response = await apiClient.get('/punches/normalized', { params });
+      setAllNormalizedForGrouping(response.data.data || []);
+    } catch (error) {
+      showToast('Erro ao carregar registros agrupados', 'error');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Group punches by employee + date
+  const groupedPunches = useMemo<GroupedPunch[]>(() => {
+    const map = new Map<string, GroupedPunch>();
+
+    for (const punch of allNormalizedForGrouping) {
+      if (!punch.employee) continue;
+      const d = new Date(punch.punchTime);
+      const dateStr = d.toLocaleDateString('sv-SE', { timeZone: 'America/Fortaleza' });
+      const key = `${punch.employee.id}_${dateStr}`;
+
+      if (!map.has(key)) {
+        const localDate = new Date(dateStr + 'T12:00:00');
+        map.set(key, {
+          key,
+          employeeName: punch.employee.name,
+          employeeId: punch.employee.id,
+          date: dateStr,
+          dayOfWeek: DAY_NAMES[localDate.getDay()],
+          entry: null,
+          breakStart: null,
+          breakEnd: null,
+          exit: null,
+        });
+      }
+
+      const group = map.get(key)!;
+      switch (punch.punchType) {
+        case 'ENTRY':
+          if (!group.entry) group.entry = punch;
+          break;
+        case 'BREAK_START':
+          if (!group.breakStart) group.breakStart = punch;
+          break;
+        case 'BREAK_END':
+          if (!group.breakEnd) group.breakEnd = punch;
+          break;
+        case 'EXIT':
+          if (!group.exit) group.exit = punch;
+          break;
+      }
+    }
+
+    // Sort by date desc, then employee name asc
+    return Array.from(map.values()).sort((a, b) => {
+      const dateComp = b.date.localeCompare(a.date);
+      if (dateComp !== 0) return dateComp;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
+  }, [allNormalizedForGrouping]);
+
+  // Paginated grouped data
+  const paginatedGrouped = useMemo(() => {
+    const start = (groupedPage - 1) * groupedPageSize;
+    return groupedPunches.slice(start, start + groupedPageSize);
+  }, [groupedPunches, groupedPage]);
+
+  const totalGroupedPages = Math.ceil(groupedPunches.length / groupedPageSize);
+
   const fetchAdjustments = async () => {
     try {
       setLoading(true);
@@ -313,6 +432,26 @@ export default function PunchesPage() {
     } catch {
       return '-';
     }
+  };
+
+  const formatTimeShort = (date: string) => {
+    if (!date) return '--:--';
+    try {
+      return new Date(date).toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Fortaleza',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    } catch {
+      return '--:--';
+    }
+  };
+
+  const formatDateBR = (dateStr: string) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('-');
+    return `${parts[2]}/${parts[1]}`;
   };
 
   const getStatusBadge = (status: string) => {
@@ -508,6 +647,22 @@ export default function PunchesPage() {
     },
   ];
 
+  // Render a clickable time cell for grouped view
+  const renderTimeCell = (punch: NormalizedPunch | null, colorClass: string) => {
+    if (!punch) {
+      return <span className="text-slate-300 dark:text-slate-600 font-mono text-sm">--:--</span>;
+    }
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); openEditModal(punch); }}
+        className={`font-mono text-sm font-semibold ${colorClass} hover:underline cursor-pointer transition-colors`}
+        title={`Clique para editar - ${PUNCH_TYPE_PT[punch.punchType] || punch.punchType}`}
+      >
+        {formatTimeShort(punch.punchTime)}
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-6 md:p-8">
       {/* Toast Container */}
@@ -562,43 +717,59 @@ export default function PunchesPage() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm inline-flex">
-          {(['normalized', 'raw', 'adjustments'] as const).map((tab) => {
-            const labels = {
-              raw: 'Registros Brutos',
-              normalized: 'Batidas',
-              adjustments: 'Ajustes',
-            };
-            const icons = {
-              raw: '📟',
-              normalized: '⏱',
-              adjustments: '✏️',
-            };
-            return (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm inline-flex">
+            {(['normalized', 'raw', 'adjustments'] as const).map((tab) => {
+              const labels = { raw: 'Registros Brutos', normalized: 'Batidas', adjustments: 'Ajustes' };
+              const icons = { raw: '📟', normalized: '⏱', adjustments: '✏️' };
+              return (
+                <button
+                  key={tab}
+                  onClick={() => { setActiveTab(tab); setCurrentPage(1); setGroupedPage(1); }}
+                  className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+                    activeTab === tab
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span>{icons[tab]}</span>
+                  {labels[tab]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* View Mode Toggle - only for Batidas tab */}
+          {activeTab === 'normalized' && (
+            <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
               <button
-                key={tab}
-                onClick={() => {
-                  setActiveTab(tab);
-                  setCurrentPage(1);
-                }}
-                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
-                  activeTab === tab
-                    ? 'bg-indigo-600 text-white shadow-lg'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                onClick={() => { setViewMode('grouped'); setGroupedPage(1); }}
+                className={`px-4 py-2 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'grouped'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <span>{icons[tab]}</span>
-                {labels[tab]}
+                📊 Agrupado
               </button>
-            );
-          })}
+              <button
+                onClick={() => { setViewMode('individual'); setCurrentPage(1); }}
+                className={`px-4 py-2 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'individual'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                📋 Individual
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Filters Section */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Filtros</h2>
           <div className="space-y-4">
-            {/* Search Input */}
             <div className="relative flex-1 max-w-md">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -611,61 +782,38 @@ export default function PunchesPage() {
                 className="w-full pl-10 pr-4 py-2.5 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               />
             </div>
-
-            {/* Filters Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Employee Filter */}
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
-                Colaborador
-              </label>
-              <select
-                value={filterEmployee}
-                onChange={(e) => {
-                  setFilterEmployee(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-              >
-                <option value="">Todos os colaboradores</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Date Filters */}
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
-                Data Inicial
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
-                Data Final
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-              />
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Colaborador</label>
+                <select
+                  value={filterEmployee}
+                  onChange={(e) => { setFilterEmployee(e.target.value); setCurrentPage(1); setGroupedPage(1); }}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                >
+                  <option value="">Todos os colaboradores</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Data Inicial</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); setGroupedPage(1); }}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Data Final</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); setGroupedPage(1); }}
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -685,7 +833,7 @@ export default function PunchesPage() {
             />
           )}
 
-          {activeTab === 'normalized' && (
+          {activeTab === 'normalized' && viewMode === 'individual' && (
             <DataTable
               columns={normalizedColumns}
               data={normalizedPunches}
@@ -696,6 +844,129 @@ export default function PunchesPage() {
               onPreviousPage={() => setCurrentPage((p) => Math.max(1, p - 1))}
               onNextPage={() => setCurrentPage((p) => p + 1)}
             />
+          )}
+
+          {activeTab === 'normalized' && viewMode === 'grouped' && (
+            <div>
+              {loading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-slate-400 text-sm">Carregando...</div>
+                </div>
+              ) : paginatedGrouped.length === 0 ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-slate-400 text-sm">Nenhum registro encontrado no período selecionado</div>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Colaborador</th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Data</th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Dia</th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                            <span className="flex items-center justify-center gap-1">→ Entrada</span>
+                          </th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                            <span className="flex items-center justify-center gap-1">⏸ Saída Int.</span>
+                          </th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                            <span className="flex items-center justify-center gap-1">▶ Retorno</span>
+                          </th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">
+                            <span className="flex items-center justify-center gap-1">← Saída</span>
+                          </th>
+                          <th className="text-center px-3 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {paginatedGrouped.map((group) => {
+                          const isWeekend = group.dayOfWeek === 'Dom' || group.dayOfWeek === 'Sáb';
+                          const isIncomplete = group.entry && !group.exit;
+                          const hasAllPunches = group.entry && group.breakStart && group.breakEnd && group.exit;
+                          return (
+                            <tr key={group.key} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${isWeekend ? 'bg-orange-50/30 dark:bg-orange-900/10' : ''}`}>
+                              <td className="px-4 py-3">
+                                <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate max-w-[200px]">
+                                  {group.employeeName}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <span className="text-sm font-mono text-slate-700 dark:text-slate-300">{formatDateBR(group.date)}</span>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                                  isWeekend
+                                    ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                                }`}>
+                                  {group.dayOfWeek}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {renderTimeCell(group.entry, 'text-emerald-700 dark:text-emerald-300')}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {renderTimeCell(group.breakStart, 'text-amber-700 dark:text-amber-300')}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {renderTimeCell(group.breakEnd, 'text-blue-700 dark:text-blue-300')}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {renderTimeCell(group.exit, 'text-red-700 dark:text-red-300')}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {hasAllPunches ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                    Completo
+                                  </span>
+                                ) : isIncomplete ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                    Incompleto
+                                  </span>
+                                ) : group.entry ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                    Parcial
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+                                    -
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Grouped Pagination */}
+                  <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700">
+                    <span className="text-sm text-slate-500 dark:text-slate-400">
+                      Página {groupedPage} de {totalGroupedPages} | Total: {groupedPunches.length} registros agrupados
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setGroupedPage((p) => Math.max(1, p - 1))}
+                        disabled={groupedPage <= 1}
+                        className="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-slate-700 dark:text-slate-300"
+                      >
+                        Anterior
+                      </button>
+                      <button
+                        onClick={() => setGroupedPage((p) => Math.min(totalGroupedPages, p + 1))}
+                        disabled={groupedPage >= totalGroupedPages}
+                        className="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-slate-700 dark:text-slate-300"
+                      >
+                        Próximo
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {activeTab === 'adjustments' && (
@@ -730,7 +1001,6 @@ export default function PunchesPage() {
                 </button>
               </div>
             </div>
-
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Colaborador *</label>
@@ -745,7 +1015,6 @@ export default function PunchesPage() {
                   ))}
                 </select>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Data *</label>
@@ -758,7 +1027,6 @@ export default function PunchesPage() {
                     className="w-full px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Tipo de Registro *</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -784,7 +1052,6 @@ export default function PunchesPage() {
                   ))}
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Motivo / Justificativa *</label>
                 <textarea
@@ -796,7 +1063,6 @@ export default function PunchesPage() {
                 />
               </div>
             </div>
-
             <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end">
               <button onClick={() => setShowManualModal(false)} className="px-5 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg font-medium text-sm transition-colors">
                 Cancelar
@@ -827,9 +1093,7 @@ export default function PunchesPage() {
                 </button>
               </div>
             </div>
-
             <div className="p-6 space-y-4">
-              {/* Current Info */}
               <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 space-y-2">
                 <h3 className="text-xs font-semibold text-slate-500 uppercase">Registro Atual</h3>
                 <div className="flex items-center justify-between">
@@ -840,8 +1104,6 @@ export default function PunchesPage() {
                   Horário atual: <strong className="text-red-600">{formatDateTime(editingPunch.punchTime)}</strong>
                 </div>
               </div>
-
-              {/* New Time */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Novo Horário *</label>
                 <div className="grid grid-cols-2 gap-4">
@@ -857,8 +1119,6 @@ export default function PunchesPage() {
                   </div>
                 </div>
               </div>
-
-              {/* Reason */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Motivo do Ajuste *</label>
                 <textarea
@@ -870,7 +1130,6 @@ export default function PunchesPage() {
                 />
               </div>
             </div>
-
             <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end">
               <button onClick={() => setShowEditModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">
                 Cancelar
