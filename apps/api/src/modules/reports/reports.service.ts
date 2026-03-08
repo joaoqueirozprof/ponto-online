@@ -16,6 +16,28 @@ interface DayCalc {
   punches: { time: string; type: string; status: string }[];
 }
 
+// Mapping of new employee IDs to their old IDs (for punch lookup)
+// Some employees were re-created with updated names, but punches remain on old IDs
+const OLD_ID_MAP: Record<string, string> = {
+  'cmmh3hqb70xn6gw0wqjwfuv7y': 'cmmh29yp30059bz9p0zcu9ftn', // MARIA VILANEIDE
+  'cmmh3hq900xn4gw0wfou371lj': 'cmmh29xql0047bz9p07dyq3mp', // MARCOS VINICIUS
+  'cmmh3hq6z0xn2gw0wh7hlsipp': 'cmmh29zg10063bz9pu8p89ent', // JOSENILTON BARBALHO
+  'cmmh3hq4y0xn0gw0w674z4wh7': 'cmmh2a08p006zbz9pgg70c6bf', // JOSE LEUDOMAR
+  'cmmh3hq2n0xmygw0wseb0zse4': 'cmmh2a01g006rbz9px6efy5il', // JOCELIO BEZERRA
+  'cmmh3hq0i0xmwgw0wkg7izpcj': 'cmmh29ywl005hbz9pk4lvy25b', // JOAO VITOR
+  'cmmh3hpyd0xmugw0wixtbnfeb': 'cmmh29yht0051bz9prr3pi0b1', // THIAGO PEREIRA
+  'cmmh3hpwf0xmsgw0wjufmae43': 'cmmh29yun005fbz9prd50t65g', // LUAN
+  'cmmh3hpuj0xmqgw0wtss4hmfc': 'cmmh29yjl0053bz9pws1a67eg', // FRANCISCI ISAC
+  'cmmh3hpso0xmogw0wj1rjpzwu': 'cmmh2a2ap0099bz9pawsa338m', // CANINDE CHAVES
+  'cmmh3hpqt0xmmgw0wkdtx9rpd': 'cmmh2a2k5009jbz9p8wzz1mkm', // F ARTHUR LOPES
+  'cmmh3hpow0xmkgw0w3ls1en7x': 'cmmh29zch005zbz9p5owtjgo1', // ANTONIO MARCOS
+  'cmmh3hpmu0xmigw0w9urwqrpd': 'cmmh29yli0055bz9plq51a4kf', // FRANCISCO EVERTON
+  'cmmh3hpkv0xmggw0wkwjd7bqu': 'cmmh2a1ci0087bz9puge9tlpa', // ERIDAN PEREIRA
+  'cmmh3hpj20xmegw0wvtyour9i': 'cmmh29zhv0065bz9p4fs1tjev', // DORIAN DIMAS
+  'cmmh3hph00xmcgw0wobsuj8km': 'cmmh29xbz003rbz9pb7ov8x58', // CICERO UBIRATAN
+  'cmmh3hpf10xmagw0wtnpkpzjs': 'cmmh2a0c80073bz9p67l0bxuy', // AMANDA CARVALHO
+};
+
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -49,9 +71,14 @@ export class ReportsService {
     });
 
     // Get all normalized punches for this employee in the month
+    // Also check the old employee ID if this is a re-created employee
+    const employeeIds = [employeeId];
+    const oldId = OLD_ID_MAP[employeeId];
+    if (oldId) employeeIds.push(oldId);
+
     const monthPunches = await this.prisma.normalizedPunch.findMany({
       where: {
-        employeeId,
+        employeeId: { in: employeeIds },
         punchTime: { gte: startDate, lte: endDate },
         status: { not: 'DELETED' as any },
       },
@@ -323,21 +350,30 @@ export class ReportsService {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
 
-    // Batch get all punches for the branch
+    // Batch get all punches for the branch (include old employee IDs too)
+    const allOldIds = Object.values(OLD_ID_MAP);
     const allPunches = await this.prisma.normalizedPunch.findMany({
       where: {
-        employee: { branchId },
-        punchTime: { gte: startDate, lte: endDate },
-        status: { not: 'DELETED' as any },
+        OR: [
+          { employee: { branchId }, punchTime: { gte: startDate, lte: endDate }, status: { not: 'DELETED' as any } },
+          { employeeId: { in: allOldIds }, punchTime: { gte: startDate, lte: endDate }, status: { not: 'DELETED' as any } },
+        ],
       },
       orderBy: { punchTime: 'asc' },
     });
 
-    // Group punches by employee
+    // Build reverse map: old ID -> new ID
+    const reverseMap: Record<string, string> = {};
+    for (const [newId, oId] of Object.entries(OLD_ID_MAP)) {
+      reverseMap[oId] = newId;
+    }
+
+    // Group punches by employee (mapping old IDs to new IDs)
     const punchesByEmployee: Record<string, any[]> = {};
     for (const punch of allPunches) {
-      if (!punchesByEmployee[punch.employeeId]) punchesByEmployee[punch.employeeId] = [];
-      punchesByEmployee[punch.employeeId].push(punch);
+      const resolvedId = reverseMap[punch.employeeId] || punch.employeeId;
+      if (!punchesByEmployee[resolvedId]) punchesByEmployee[resolvedId] = [];
+      punchesByEmployee[resolvedId].push(punch);
     }
 
     // Get holidays
