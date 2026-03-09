@@ -274,6 +274,7 @@ export class ControlIdService {
 
         const retryResult = await httpPost(retryUrl, body);
         if (retryResult.status !== 200) {
+          this.logger.error(`Retry failed for ${endpoint}: status=${retryResult.status} body=${retryResult.data?.substring(0, 200)}`);
           throw new Error(`Request failed after retry: ${retryResult.status}`);
         }
 
@@ -281,6 +282,7 @@ export class ControlIdService {
       }
 
       if (result.status !== 200) {
+        this.logger.error(`Request to ${endpoint} failed: status=${result.status} body=${result.data?.substring(0, 200)}`);
         throw new Error(`Request to ${endpoint} failed: ${result.status}`);
       }
 
@@ -292,7 +294,10 @@ export class ControlIdService {
   }
 
   /**
-   * Export AFD (Arquivo Fonte de Dados) from device
+   * Export AFD (Arquivo Fonte de Dados) from device.
+   *
+   * Always sends at least {} as body — Control iD devices return 400 when
+   * Content-Type: application/json is present but the body is empty.
    */
   async exportAfd(deviceId: string, initialDate?: { day: number; month: number; year: number }, initialNsr?: number): Promise<string> {
     const body: any = {};
@@ -303,7 +308,8 @@ export class ControlIdService {
       body.initial_nsr = initialNsr;
     }
 
-    const afdText = await this.request(deviceId, 'export_afd.fcgi', Object.keys(body).length > 0 ? body : undefined);
+    // Always pass body (even empty {}) to avoid 400 on Content-Type:application/json with no body
+    const afdText = await this.request(deviceId, 'export_afd.fcgi', body);
     return typeof afdText === 'string' ? afdText : JSON.stringify(afdText);
   }
 
