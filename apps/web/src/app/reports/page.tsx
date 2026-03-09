@@ -325,6 +325,56 @@ export default function ReportsPage() {
     </button>
   );
 
+  const CSVBtn = ({ onClick, label = 'Exportar CSV' }: { onClick: () => void; label?: string }) => (
+    <button onClick={onClick}
+      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition flex items-center gap-2 shadow-sm">
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+      </svg>
+      {label}
+    </button>
+  );
+
+  const downloadCSV = (filename: string, header: string[], rows: (string | number)[]) => {
+    const csv = [header, ...rows].map(r => Array.isArray(r) ? r.map(c => `"${c}"`).join(',') : `"${r}"`).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPayrollCSV = () => {
+    if (!payData) return;
+    const monthName = getMonthName(payData.month);
+    const branch = branchName(payData.branch);
+    const header = ['Nome', 'CPF', 'PIS', 'Cargo', 'Setor', 'Dias Trabalhados', 'H. Trabalhadas', 'H. Previstas', 'H. Extras', 'H. Noturnas', 'Atrasos', 'Faltas', 'Saldo', 'Status'];
+    const rows = payData.payrollData.map(p => [
+      p.employee.name, p.employee.cpf, p.employee.pis || '',
+      p.employee.position || '', p.employee.department || '',
+      p.daysWorked, p.workedHours, p.expectedHours, p.overtimeHours,
+      p.nightHours, fmtHHMM(p.lateMinutes), fmtHHMM(p.absenceMinutes),
+      fmtHHMM(p.balanceMinutes), p.status,
+    ]);
+    downloadCSV(`folha_pagamento_${branch.replace(/\s+/g,'-')}_${monthName}_${payData.year}.csv`, header, rows as any);
+  };
+
+  const exportBranchCSV = () => {
+    if (!brData) return;
+    const monthName = getMonthName(brData.month);
+    const branch = branchName(brData.branch);
+    const header = ['Nome', 'CPF', 'Cargo', 'Setor', 'H. Trabalhadas', 'H. Extras', 'H. Noturnas', 'Atrasos', 'Faltas', 'Saldo', 'Dias Trabalhados', 'Com Ponto', 'Status'];
+    const rows = brData.employees.map(e => [
+      e.employee.name, e.employee.cpf, e.employee.position || '', e.employee.department || '',
+      fmtHHMM(e.totalWorkedMinutes), fmtHHMM(e.totalOvertimeMinutes), fmtHHMM(e.totalNightMinutes),
+      fmtHHMM(e.totalLateMinutes), fmtHHMM(e.totalAbsenceMinutes), fmtHHMM(e.totalBalanceMinutes),
+      e.daysWorked, e.hasPunches ? 'Sim' : 'Não', e.status,
+    ]);
+    downloadCSV(\`relatorio_filial_\${branch.replace(/\s+/g,'-')}_\${monthName}_\${brData.year}.csv\`, header, rows as any);
+  };
+
   const dayRowClass = (status: string, idx: number): string => {
     switch (status) {
       case 'WEEKEND': return 'bg-slate-50/70 text-slate-400';
@@ -591,6 +641,7 @@ export default function ReportsPage() {
                     {companyName(brData.branch) && <p className="text-xs text-slate-400">{companyName(brData.branch)}</p>}
                   </div>
                   <div className="flex gap-2">
+                    <CSVBtn onClick={exportBranchCSV} label="Exportar CSV" />
                     <PDFBtn onClick={() => generatePDF('branch-report-pdf', `relatorio_filial_${getMonthName(brData.month)}_${brData.year}`)} />
                     <PrintBtn onClick={() => window.print()} />
                   </div>
@@ -720,6 +771,7 @@ export default function ReportsPage() {
                     <p className="text-sm text-indigo-600 font-semibold">{getMonthName(payData.month)} / {payData.year}</p>
                   </div>
                   <div className="flex gap-2">
+                    <CSVBtn onClick={exportPayrollCSV} label="Exportar CSV" />
                     <PDFBtn onClick={() => generatePDF('payroll-report-pdf', `folha_pagamento_${getMonthName(payData.month)}_${payData.year}`)} />
                     <PrintBtn onClick={() => window.print()} />
                   </div>

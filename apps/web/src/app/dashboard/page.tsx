@@ -16,6 +16,8 @@ interface DashboardStats {
   todayPunches: number;
   todayPresent: number;
   nextHoliday: { name: string; date: string } | null;
+  monthlyOvertimeMinutes: number;
+  employeesNoPunch: number;
 }
 
 interface RecentPunch {
@@ -37,7 +39,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [stats, setStats] = useState<DashboardStats>({
-    employees: 0, branches: 0, devices: 0, devicesOnline: 0, pendingTimesheets: 0, approvedTimesheets: 0, todayPunches: 0, todayPresent: 0, nextHoliday: null,
+    employees: 0, branches: 0, devices: 0, devicesOnline: 0, pendingTimesheets: 0, approvedTimesheets: 0, todayPunches: 0, todayPresent: 0, nextHoliday: null, monthlyOvertimeMinutes: 0, employeesNoPunch: 0,
   });
   const [statsLoading, setStatsLoading] = useState(true);
   const [recentPunches, setRecentPunches] = useState<RecentPunch[]>([]);
@@ -74,7 +76,7 @@ export default function DashboardPage() {
 
       const [empRes, branchRes, deviceRes, tsOpenRes, tsApprovedRes, punchesRes, holidaysRes] = await Promise.all([
         apiClient.get('/employees', { params: { take: 1 } }).catch(() => ({ data: { total: 0 } })),
-        apiClient.get('/branches', { params: { take: 1 } }).catch(() => ({ data: { total: 0 } })),
+        apiClient.get('/branches', { params: { take: 50 } }).catch(() => ({ data: { data: [], total: 0 } })),
         apiClient.get('/devices', { params: { take: 999 } }).catch(() => ({ data: { data: [], total: 0 } })),
         apiClient.get('/timesheets', { params: { take: 1, month: currentMonth, year: currentYear, status: 'OPEN' } }).catch(() => ({ data: { total: 0 } })),
         apiClient.get('/timesheets', { params: { take: 1, month: currentMonth, year: currentYear, status: 'APPROVED' } }).catch(() => ({ data: { total: 0 } })),
@@ -84,6 +86,25 @@ export default function DashboardPage() {
 
       const devices = deviceRes.data.data || [];
       const onlineDevices = devices.filter((d: any) => d.status === 'online').length;
+
+      // Fetch monthly overtime from first branch report
+      let monthlyOvertimeMinutes = 0;
+      let employeesNoPunch = 0;
+      const allBranches = branchRes.data.data || [];
+      if (allBranches.length > 0) {
+        try {
+          const branchReports = await Promise.all(
+            allBranches.map((b: any) =>
+              apiClient.get(`/reports/branch/${b.id}/${currentMonth}/${currentYear}`)
+                .catch(() => ({ data: { summary: { totalOvertimeMinutes: 0, employeesWithoutPunches: 0 } } }))
+            )
+          );
+          for (const br of branchReports) {
+            monthlyOvertimeMinutes += br.data.summary?.totalOvertimeMinutes || 0;
+            employeesNoPunch += br.data.summary?.employeesWithoutPunches || 0;
+          }
+        } catch { /* ignore */ }
+      }
 
       // Calculate today's stats from punches
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -102,7 +123,7 @@ export default function DashboardPage() {
 
       const newStats = {
         employees: empRes.data.total || 0,
-        branches: branchRes.data.total || 0,
+        branches: branchRes.data.total || allBranches.length || 0,
         devices: deviceRes.data.total || devices.length || 0,
         devicesOnline: onlineDevices,
         pendingTimesheets: tsOpenRes.data.total || 0,
@@ -110,6 +131,8 @@ export default function DashboardPage() {
         todayPunches: todayPunches.length,
         todayPresent: uniqueEmployeesToday.size,
         nextHoliday,
+        monthlyOvertimeMinutes,
+        employeesNoPunch,
       };
       setStats(newStats);
 
@@ -117,6 +140,14 @@ export default function DashboardPage() {
       const newAlerts: { type: string; message: string; color: string }[] = [];
       if (newStats.pendingTimesheets > 0) {
         newAlerts.push({ type: 'warning', message: `${newStats.pendingTimesheets} folha(s) de ponto pendente(s) de aprovação`, color: 'amber' });
+      }
+      if (newStats.employeesNoPunch > 0) {
+        newAlerts.push({ type: 'alert', message: `${newStats.employeesNoPunch} colaborador(es) sem registro de ponto no mês`, color: 'red' });
+      }
+      if (newStats.monthlyOvertimeMinutes > 0) {
+        const otH = Math.floor(newStats.monthlyOvertimeMinutes / 60);
+        const otM = newStats.monthlyOvertimeMinutes % 60;
+        newAlerts.push({ type: 'info', message: `Total de horas extras no mês: ${otH}h${otM > 0 ? String(otM).padStart(2,'0')+'min' : ''}`, color: 'blue' });
       }
       if (newStats.employees > 0 && newStats.todayPresent === 0 && now.getHours() >= 9 && now.getDay() >= 1 && now.getDay() <= 5) {
         newAlerts.push({ type: 'alert', message: 'Nenhum colaborador registrou ponto hoje', color: 'red' });
@@ -214,6 +245,11 @@ export default function DashboardPage() {
     }
   };
 
+  const fmtHHMM = (m: number) => {
+    if (!m) return '0h';
+    return `${Math.floor(m / 60)}h${m % 60 > 0 ? String(m % 60).padStart(2,'0')+'min' : ''}`;
+  };
+
   const statCards = [
     {
       label: 'Colaboradores',
@@ -259,6 +295,28 @@ export default function DashboardPage() {
       color: 'violet',
       href: '/punches',
     },
+    {
+      label: 'Horas Extras (Mês)',
+      value: fmtHHMM(stats.monthlyOvertimeMinutes),
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+      color: 'orange',
+      href: '/overtime',
+    },
+    {
+      label: 'Sem Registro (Mês)',
+      value: stats.employeesNoPunch,
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+        </svg>
+      ),
+      color: stats.employeesNoPunch > 0 ? 'red' : 'slate',
+      href: '/overtime',
+    },
   ];
 
   const colorMap: Record<string, { iconBg: string; text: string }> = {
@@ -267,11 +325,15 @@ export default function DashboardPage() {
     amber: { iconBg: 'bg-amber-500/10', text: 'text-amber-500' },
     violet: { iconBg: 'bg-violet-500/10', text: 'text-violet-500' },
     teal: { iconBg: 'bg-teal-500/10', text: 'text-teal-500' },
+    orange: { iconBg: 'bg-orange-500/10', text: 'text-orange-500' },
+    red: { iconBg: 'bg-red-500/10', text: 'text-red-500' },
+    slate: { iconBg: 'bg-slate-500/10', text: 'text-slate-500' },
   };
 
   const quickLinks = [
     { label: 'Colaboradores', href: '/employees', desc: 'Gerenciar equipe' },
     { label: 'Registros', href: '/punches', desc: 'Ver batidas' },
+    { label: 'Horas Extras', href: '/overtime', desc: 'Relatório rápido RH' },
     { label: 'Relatorios', href: '/reports', desc: 'Gerar relatorios' },
     { label: 'Escalas', href: '/schedules', desc: 'Horarios de trabalho' },
     { label: 'Folhas de Ponto', href: '/timesheets', desc: 'Controle mensal' },
@@ -326,7 +388,7 @@ export default function DashboardPage() {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {statCards.map((stat) => {
           const colors = colorMap[stat.color];
           return (

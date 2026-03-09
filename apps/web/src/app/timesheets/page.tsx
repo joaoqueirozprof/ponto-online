@@ -176,6 +176,15 @@ export default function TimesheetsPage() {
   const [batchApproving, setBatchApproving] = useState(false);
   const pageSize = 15;
 
+  // Manual punch modal state
+  const [manualPunchModal, setManualPunchModal] = useState(false);
+  const [manualPunchEmployee, setManualPunchEmployee] = useState<{ id: string; name: string } | null>(null);
+  const [manualPunchDate, setManualPunchDate] = useState('');
+  const [manualPunchTime, setManualPunchTime] = useState('');
+  const [manualPunchType, setManualPunchType] = useState('ENTRY');
+  const [manualPunchReason, setManualPunchReason] = useState('');
+  const [manualPunchLoading, setManualPunchLoading] = useState(false);
+
   // Detail modal
   const [detailModal, setDetailModal] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -310,6 +319,62 @@ export default function TimesheetsPage() {
       console.error(error);
     } finally {
       setBatchApproving(false);
+    }
+  };
+
+  const handleOpenManualPunch = (ts: Timesheet, prefillDate?: string) => {
+    setManualPunchEmployee({ id: ts.employeeId, name: ts.employee?.name || 'Funcionário' });
+    // Pre-fill date: if prefillDate provided use it, else use today
+    if (prefillDate) {
+      setManualPunchDate(prefillDate);
+    } else {
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = String(today.getMonth() + 1).padStart(2, '0');
+      const d = String(today.getDate()).padStart(2, '0');
+      setManualPunchDate(`${y}-${m}-${d}`);
+    }
+    setManualPunchTime('08:00');
+    setManualPunchType('ENTRY');
+    setManualPunchReason('');
+    setManualPunchModal(true);
+  };
+
+  const handleSubmitManualPunch = async () => {
+    if (!manualPunchEmployee || !manualPunchDate || !manualPunchTime || !manualPunchReason.trim()) {
+      showToast('Preencha todos os campos obrigatórios, incluindo a justificativa', 'error');
+      return;
+    }
+    setManualPunchLoading(true);
+    try {
+      const punchTime = new Date(`${manualPunchDate}T${manualPunchTime}:00`).toISOString();
+      await apiClient.post('/punches/manual', {
+        employeeId: manualPunchEmployee.id,
+        punchTime,
+        punchType: manualPunchType,
+        reason: manualPunchReason.trim(),
+        createdBy: 'RH',
+      });
+      showToast(`Batida registrada com sucesso para ${manualPunchEmployee.name}`, 'success');
+      setManualPunchModal(false);
+      setManualPunchEmployee(null);
+      setManualPunchReason('');
+      fetchTimesheets();
+      // Refresh detail if open
+      if (detailModal && timesheetDetail) {
+        setDetailLoading(true);
+        try {
+          const response = await apiClient.get(`/timesheets/${timesheetDetail.employee.id}/${timesheetDetail.month}/${timesheetDetail.year}`);
+          setTimesheetDetail(response.data);
+        } catch { /* silent */ } finally {
+          setDetailLoading(false);
+        }
+      }
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || 'Erro ao registrar batida';
+      showToast(msg, 'error');
+    } finally {
+      setManualPunchLoading(false);
     }
   };
 
@@ -471,6 +536,13 @@ export default function TimesheetsPage() {
             className="px-2.5 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
           >
             Ver Detalhes
+          </button>
+          <button
+            onClick={() => handleOpenManualPunch(row)}
+            className="px-2.5 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+            title="Lançar batida manual"
+          >
+            + Ponto
           </button>
           <select
             value={row.status}
@@ -701,6 +773,7 @@ export default function TimesheetsPage() {
                     <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Extras</th>
                     <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Atraso</th>
                     <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Status</th>
+                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-slate-600 uppercase">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -733,6 +806,39 @@ export default function TimesheetsPage() {
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${dayInfo.color}`}>
                               {dayInfo.label}
                             </span>
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            {timesheetDetail && (
+                              <button
+                                onClick={() => {
+                                  if (!timesheetDetail) return;
+                                  const fakeTs: Timesheet = {
+                                    id: timesheetDetail.id,
+                                    employeeId: timesheetDetail.employee.id,
+                                    month: timesheetDetail.month,
+                                    year: timesheetDetail.year,
+                                    status: timesheetDetail.status as any,
+                                    totalWorkedMinutes: timesheetDetail.totalWorkedMinutes,
+                                    totalOvertimeMinutes: timesheetDetail.totalOvertimeMinutes,
+                                    totalNightMinutes: 0,
+                                    totalAbsenceMinutes: timesheetDetail.totalAbsenceMinutes,
+                                    totalLateMinutes: timesheetDetail.totalLateMinutes,
+                                    totalBalanceMinutes: timesheetDetail.totalBalanceMinutes,
+                                    employee: {
+                                      id: timesheetDetail.employee.id,
+                                      name: timesheetDetail.employee.name,
+                                      cpf: timesheetDetail.employee.cpf,
+                                      branch: { id: '', name: '' },
+                                    },
+                                  };
+                                  handleOpenManualPunch(fakeTs, datePart);
+                                }}
+                                className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors"
+                                title={`Lançar ponto para ${datePart}`}
+                              >
+                                + Ponto
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -798,6 +904,139 @@ export default function TimesheetsPage() {
                 className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
               >
                 {batchApproving ? 'Aprovando...' : `Aprovar ${selectedIds.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Punch Modal */}
+      {manualPunchModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-violet-100 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Lançamento Manual de Ponto</h3>
+                  <p className="text-xs text-slate-500 truncate max-w-[200px]">{manualPunchEmployee?.name}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setManualPunchModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4">
+              {/* Alert */}
+              <div className="flex gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-xs text-amber-700">
+                  Este lançamento ficará registrado no histórico de auditoria com a justificativa informada.
+                </p>
+              </div>
+
+              {/* Date + Time */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Data *</label>
+                  <input
+                    type="date"
+                    value={manualPunchDate}
+                    onChange={(e) => setManualPunchDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Hora *</label>
+                  <input
+                    type="time"
+                    value={manualPunchTime}
+                    onChange={(e) => setManualPunchTime(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Punch Type */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Tipo de Batida *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'ENTRY', label: 'Entrada', color: 'text-emerald-700 border-emerald-300 bg-emerald-50', active: 'ring-2 ring-emerald-500 border-emerald-500' },
+                    { value: 'BREAK_START', label: 'Saída Intervalo', color: 'text-amber-700 border-amber-300 bg-amber-50', active: 'ring-2 ring-amber-500 border-amber-500' },
+                    { value: 'BREAK_END', label: 'Retorno Intervalo', color: 'text-blue-700 border-blue-300 bg-blue-50', active: 'ring-2 ring-blue-500 border-blue-500' },
+                    { value: 'EXIT', label: 'Saída', color: 'text-red-700 border-red-300 bg-red-50', active: 'ring-2 ring-red-500 border-red-500' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setManualPunchType(opt.value)}
+                      className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all ${opt.color} ${manualPunchType === opt.value ? opt.active : 'opacity-60 hover:opacity-100'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Justificativa <span className="text-red-500">*</span>
+                  <span className="text-slate-400 font-normal ml-1">(obrigatória)</span>
+                </label>
+                <textarea
+                  value={manualPunchReason}
+                  onChange={(e) => setManualPunchReason(e.target.value)}
+                  placeholder="Descreva o motivo do lançamento manual (ex: esqueceu de bater o ponto, sistema offline, etc.)"
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-colors resize-none"
+                />
+                <p className="text-xs text-slate-400 mt-1">{manualPunchReason.length}/200 caracteres</p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 rounded-b-2xl border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => setManualPunchModal(false)}
+                disabled={manualPunchLoading}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSubmitManualPunch}
+                disabled={manualPunchLoading || !manualPunchReason.trim()}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {manualPunchLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Registrando...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Registrar Batida
+                  </>
+                )}
               </button>
             </div>
           </div>
