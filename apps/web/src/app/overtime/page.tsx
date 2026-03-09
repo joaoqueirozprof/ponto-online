@@ -56,6 +56,7 @@ export default function OvertimePage() {
   const [filterMode, setFilterMode] = useState<'all' | 'with_overtime' | 'no_punch'>('with_overtime');
   const [minHours, setMinHours] = useState('0');
   const [searchEmployee, setSearchEmployee] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState('');
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -93,6 +94,9 @@ export default function OvertimePage() {
   }).filter(e => {
     if (!searchEmployee.trim()) return true;
     return e.employee.name.toLowerCase().includes(searchEmployee.toLowerCase());
+  }).filter(e => {
+    if (!selectedEmployee) return true;
+    return e.employee.id === selectedEmployee;
   }).sort((a, b) => b.overtimeMinutes - a.overtimeMinutes);
 
   const totalOT = filtered.reduce((s, e) => s + e.overtimeMinutes, 0);
@@ -125,13 +129,13 @@ export default function OvertimePage() {
             <div style="color:#475569;font-size:11px">${item.employee.position || '—'}</div>
             <div style="color:#94a3b8;font-size:10px">${item.employee.department || '—'}</div>
           </td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px">
-            ${item.hasPunches ? `<span style="color:#0f172a">${fmtHHMM(item.workedMinutes)}</span>` : '<span style="color:#f87171;font-size:10px">Sem ponto</span>'}
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">
+            ${item.hasPunches ? fmtHHMM(item.workedMinutes) : 'Sem ponto'}
           </td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b">${fmtHHMM(item.expectedMinutes)}</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass}">${fmtHHMM(item.overtimeMinutes)}</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.lateMinutes)}</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#475569">${item.daysWorked}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.expectedMinutes)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass};outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.overtimeMinutes)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'};outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.lateMinutes)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#475569;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${item.daysWorked}</td>
         </tr>`;
     }).join('');
 
@@ -139,6 +143,7 @@ export default function OvertimePage() {
       <meta charset="UTF-8">
       <title>Horas Extras — ${bName} — ${mLabel}/${year}</title>
       <style>
+        @media print { #toolbar { display: none !important; } }
         @page { margin: 15mm; size: A4 landscape; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1e293b; font-size: 13px; }
@@ -230,7 +235,24 @@ export default function OvertimePage() {
 
       <div class="footer">Ponto Online — Relatório gerado automaticamente • ${bName} • ${mLabel}/${year}</div>
 
-      <script>window.onload = function() { window.print(); };</script>
+      <script>
+        function imprimirRelatorio() {
+          document.getElementById('toolbar').style.display = 'none';
+          window.print();
+          document.getElementById('toolbar').style.display = 'flex';
+        }
+      </script>
+      <div id="toolbar" style="position:fixed;top:0;left:0;right:0;background:#4f46e5;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:white;font-size:13px;font-weight:600">Pre-visualizacao do Relatorio</span>
+          <span style="color:rgba(255,255,255,0.7);font-size:11px">Clique em qualquer valor da tabela para editar antes de imprimir</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="imprimirRelatorio()" style="background:white;color:#4f46e5;border:none;padding:8px 20px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Imprimir / Salvar PDF</button>
+          <button onclick="window.close()" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer">Fechar</button>
+        </div>
+      </div>
+      <div style="height:50px"></div>
     </body></html>`;
 
     const win = window.open('', '_blank');
@@ -337,30 +359,53 @@ export default function OvertimePage() {
           </div>
         </div>
 
-        {/* Employee search */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-slate-600 mb-1.5">Buscar Funcionario</label>
-          <div className="relative max-w-sm">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Digite o nome do funcionario..."
-              value={searchEmployee}
-              onChange={e => setSearchEmployee(e.target.value)}
-              className="w-full h-9 pl-10 pr-4 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {searchEmployee && (
-              <button
-                onClick={() => setSearchEmployee('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+        {/* Employee filter */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Funcionario Individual</label>
+            <select
+              value={selectedEmployee}
+              onChange={e => setSelectedEmployee(e.target.value)}
+              className={`w-full h-9 px-3 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${selectedEmployee ? 'border-violet-400 text-violet-900 font-medium' : 'border-slate-200'}`}
+            >
+              <option value="">Todos os funcionarios</option>
+              {data.sort((a, b) => a.employee.name.localeCompare(b.employee.name)).map(e => (
+                <option key={e.employee.id} value={e.employee.id}>
+                  {e.employee.name} — {e.employee.position || 'Sem cargo'} ({fmtHHMM(e.overtimeMinutes)} extras)
+                </option>
+              ))}
+            </select>
+            {selectedEmployee && (
+              <p className="text-xs text-violet-600 mt-1 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Relatorio individual selecionado
+              </p>
             )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Buscar por nome</label>
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Filtrar por nome..."
+                value={searchEmployee}
+                onChange={e => setSearchEmployee(e.target.value)}
+                className="w-full h-9 pl-10 pr-4 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              {searchEmployee && (
+                <button
+                  onClick={() => setSearchEmployee('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
