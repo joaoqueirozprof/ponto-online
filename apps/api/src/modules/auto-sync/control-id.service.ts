@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as http from 'http';
 import * as https from 'https';
+import * as net from 'net';
+import * as tls from 'tls';
 
 export interface ControlIdSession {
   deviceId: string;
@@ -29,59 +31,130 @@ export interface ControlIdUser {
 }
 
 /**
- * Helper to make HTTP/HTTPS POST requests using Node's http/https module
- * Supports HTTP redirects (301/302) and self-signed SSL certificates
+ * Raw TCP/TLS HTTP POST — bypasses Node.js strict HTTP parser.
+ * Control iD devices use LF (\n) instead of CRLF (\r\n) in HTTP responses,
+ * which causes Node's built-in http/https modules to throw parse errors.
+ * This function uses raw socket I/O and parses the response manually.
  */
-function httpPost(url: string, body?: any, timeoutMs = 30000, followRedirects = true): Promise<{ status: number; data: string }> {
+function rawHttpPost(
+  host: string,
+  port: number,
+  path: string,
+  body: string,
+  useHttps: boolean,
+  timeoutMs = 30000,
+): Promise<{ status: number; data: string }> {
   return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const isHttps = parsed.protocol === 'https:';
-    const postData = body ? JSON.stringify(body) : '';
+    const request = [
+      `POST ${path} HTTP/1.0`,
+      `Host: ${host}`,
+      'Content-Type: application/json',
+      `Content-Length: ${Buffer.byteLength(body)}`,
+      'Connection: close',
+      '',
+      body,
+    ].join('\r\n');
 
-    const options: any = {
-      hostname: parsed.hostname,
-      port: parsed.port || (isHttps ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-      timeout: timeoutMs,
-      // Allow self-signed certificates on local network devices
-      rejectUnauthorized: false,
-    };
+    let socket: net.Socket;
 
-    const transport = isHttps ? https : http;
-
-    const req = (transport as any).request(options, (res: any) => {
-      // Handle redirects (301, 302, 303, 307, 308)
-      if (followRedirects && res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-        const location = res.headers.location as string;
-        const redirectUrl = location.startsWith('http')
-          ? location
-          : `${parsed.protocol}//${parsed.host}${location}`;
-        res.resume(); // consume and discard response body
-        resolve(httpPost(redirectUrl, body, timeoutMs, false));
-        return;
-      }
-
-      let data = '';
-      res.on('data', (chunk: any) => { data += chunk; });
-      res.on('end', () => {
-        resolve({ status: res.statusCode || 0, data });
+    if (useHttps) {
+      socket = tls.connect({
+        host,
+        port,
+        rejectUnauthorized: false,
+        timeout: timeoutMs,
       });
-    });
+    } else {
+      socket = net.createConnection({ host, port });
+      socket.setTimeout(timeoutMs);
+    }
 
-    req.on('error', (err: Error) => reject(err));
-    req.on('timeout', () => {
-      req.destroy();
+    let rawData = Buffer.alloc(0);
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      socket.destroy();
       reject(new Error(`Request timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    socket.on('connect', () => {
+      socket.write(request);
     });
 
-    if (postData) req.write(postData);
-    req.end();
+    // For TLS, wait for 'secureConnect' event
+    if (useHttps) {
+      (socket as tls.TLSSocket).on('secureConnect', () => {
+        socket.write(request);
+      });
+      // Remove the 'connect' listener to avoid double-write
+      socket.removeAllListeners('connect');
+    }
+
+    socket.on('data', (chunk) => {
+      rawData = Buffer.concat([rawData, chunk]);
+    });
+
+    socket.on('end', () => {
+      clearTimeout(timer);
+      if (timedOut) return;
+      try {
+        const raw = rawData.toString('utf8');
+        // Split headers from body on \r\n\r\n or \n\n
+        const sepIdx = raw.indexOf('\r\n\r\n') !== -1
+          ? raw.indexOf('\r\n\r\n') + 4
+          : raw.indexOf('\n\n') + 2;
+
+        const headerPart = sepIdx > 4 ? raw.substring(0, sepIdx) : raw;
+        const responseBody = sepIdx > 4 ? raw.substring(sepIdx) : '';
+
+        // Parse status code from first line
+        const firstLine = headerPart.split(/\r?\n/)[0] || '';
+        const statusMatch = firstLine.match(/HTTP\/[\d.]+ (\d+)/);
+        const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+
+        // Handle redirect via Location header
+        const locationMatch = headerPart.match(/[Ll]ocation:\s*(.+?)[\r\n]/);
+        if (locationMatch && [301, 302, 303, 307, 308].includes(status)) {
+          const location = locationMatch[1].trim();
+          const redirectUrl = location.startsWith('http')
+            ? location
+            : `${useHttps ? 'https' : 'http'}://${host}:${port}${location}`;
+          const rParsed = new URL(redirectUrl);
+          const rPort = parseInt(rParsed.port) || (rParsed.protocol === 'https:' ? 443 : 80);
+          resolve(rawHttpPost(rParsed.hostname, rPort, rParsed.pathname + rParsed.search, body, rParsed.protocol === 'https:', timeoutMs));
+          return;
+        }
+
+        resolve({ status, data: responseBody });
+      } catch (err: any) {
+        reject(err);
+      }
+    });
+
+    socket.on('error', (err) => {
+      clearTimeout(timer);
+      if (!timedOut) reject(err);
+    });
+
+    socket.on('timeout', () => {
+      clearTimeout(timer);
+      socket.destroy();
+      reject(new Error(`Socket timeout after ${timeoutMs}ms`));
+    });
   });
+}
+
+/**
+ * Wrapper to call rawHttpPost from a URL string
+ */
+function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status: number; data: string }> {
+  const parsed = new URL(url);
+  const isHttps = parsed.protocol === 'https:';
+  const port = parsed.port ? parseInt(parsed.port) : (isHttps ? 443 : 80);
+  const path = parsed.pathname + parsed.search;
+  const postData = body ? JSON.stringify(body) : '';
+  return rawHttpPost(parsed.hostname, port, path, postData, isHttps, timeoutMs);
 }
 
 /**
