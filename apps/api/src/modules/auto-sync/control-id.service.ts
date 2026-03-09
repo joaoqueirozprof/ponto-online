@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as http from 'http';
+import * as https from 'https';
 
 export interface ControlIdSession {
   deviceId: string;
@@ -28,16 +29,18 @@ export interface ControlIdUser {
 }
 
 /**
- * Helper to make HTTP POST requests using Node's http module
+ * Helper to make HTTP/HTTPS POST requests using Node's http/https module
+ * Supports HTTP redirects (301/302) and self-signed SSL certificates
  */
-function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status: number; data: string }> {
+function httpPost(url: string, body?: any, timeoutMs = 30000, followRedirects = true): Promise<{ status: number; data: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
+    const isHttps = parsed.protocol === 'https:';
     const postData = body ? JSON.stringify(body) : '';
 
-    const options: http.RequestOptions = {
+    const options: any = {
       hostname: parsed.hostname,
-      port: parsed.port || 80,
+      port: parsed.port || (isHttps ? 443 : 80),
       path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: {
@@ -45,17 +48,32 @@ function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status:
         'Content-Length': Buffer.byteLength(postData),
       },
       timeout: timeoutMs,
+      // Allow self-signed certificates on local network devices
+      rejectUnauthorized: false,
     };
 
-    const req = http.request(options, (res) => {
+    const transport = isHttps ? https : http;
+
+    const req = (transport as any).request(options, (res: any) => {
+      // Handle redirects (301, 302, 303, 307, 308)
+      if (followRedirects && res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        const location = res.headers.location as string;
+        const redirectUrl = location.startsWith('http')
+          ? location
+          : `${parsed.protocol}//${parsed.host}${location}`;
+        res.resume(); // consume and discard response body
+        resolve(httpPost(redirectUrl, body, timeoutMs, false));
+        return;
+      }
+
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      res.on('data', (chunk: any) => { data += chunk; });
       res.on('end', () => {
         resolve({ status: res.statusCode || 0, data });
       });
     });
 
-    req.on('error', (err) => reject(err));
+    req.on('error', (err: Error) => reject(err));
     req.on('timeout', () => {
       req.destroy();
       reject(new Error(`Request timeout after ${timeoutMs}ms`));
@@ -64,6 +82,17 @@ function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status:
     if (postData) req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Determine base URL for device — uses HTTPS when port is 443
+ */
+function getBaseUrl(ipAddress: string, port: number | null): string {
+  const p = port || 80;
+  if (p === 443) {
+    return `https://${ipAddress}:${p}`;
+  }
+  return `http://${ipAddress}:${p}`;
 }
 
 @Injectable()
@@ -85,7 +114,7 @@ export class ControlIdService {
       throw new Error(`Device ${deviceId} not found`);
     }
 
-    const baseUrl = `http://${device.ipAddress}:${device.port || 80}`;
+    const baseUrl = getBaseUrl(device.ipAddress, device.port);
 
     try {
       const result = await httpPost(`${baseUrl}/login.fcgi`, {
@@ -331,8 +360,9 @@ export class ControlIdService {
 
       if (!device) return false;
 
+      const baseUrl = getBaseUrl(device.ipAddress, device.port);
       const result = await httpPost(
-        `http://${device.ipAddress}:${device.port || 80}/login.fcgi`,
+        `${baseUrl}/login.fcgi`,
         { login: device.login || 'admin', password: device.encryptedPassword || 'admin' },
         5000,
       );
