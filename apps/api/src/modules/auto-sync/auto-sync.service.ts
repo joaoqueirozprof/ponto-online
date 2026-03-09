@@ -149,11 +149,86 @@ export class AutoSyncService {
       };
     }
 
-    // Export AFD from device
-    const afdText = await this.controlId.exportAfd(deviceId, initialDate, initialNsr);
-    const records = this.controlId.parseAfdRecords(afdText);
+    // Export AFD from device.
+    // Some firmware versions don't support export_afd.fcgi; fall back to access_logs.
+    // AfdRecord extended with optional fields from access_logs path
+    type ExtendedRecord = import('./control-id.service').AfdRecord & {
+      accessLogId?: number;
+      punchTimeUtc?: Date;
+    };
+    let records: ExtendedRecord[];
+    let useAccessLogs = false;
 
-    this.logger.log(`Parsed ${records.length} AFD records from device ${device.name}`);
+    try {
+      const afdText = await this.controlId.exportAfd(deviceId, initialDate, initialNsr);
+      records = this.controlId.parseAfdRecords(afdText);
+      this.logger.log(`Parsed ${records.length} AFD records from device ${device.name}`);
+    } catch (afdError: any) {
+      if (
+        afdError.message?.includes('400') ||
+        afdError.message?.toLowerCase().includes('invalid command')
+      ) {
+        // Device doesn't support AFD — fall back to access_logs via load_objects.fcgi
+        this.logger.warn(
+          `Device ${device.name} does not support export_afd.fcgi — using access_logs fallback`,
+        );
+        useAccessLogs = true;
+
+        // Load device users to map user_id → registration (PIS)
+        const deviceUsers = await this.controlId.loadUsers(deviceId);
+        const userIdToReg: Record<number, string> = {};
+        for (const u of deviceUsers) {
+          if (u.id != null && u.registration) {
+            userIdToReg[u.id] = u.registration;
+          }
+        }
+
+        // Determine since which log ID to fetch (incremental)
+        let sinceId: number | undefined;
+        let sinceTime: number | undefined;
+        if (lastRecord?.rawData && typeof lastRecord.rawData === 'object') {
+          const raw = lastRecord.rawData as any;
+          if (raw.accessLogId != null) {
+            sinceId = (raw.accessLogId as number) + 1;
+          }
+        }
+        if (sinceId === undefined && lastSync?.finishedAt) {
+          // Convert last sync date to Unix timestamp BRT (subtract 3h to undo our +3h offset)
+          sinceTime = Math.floor(lastSync.finishedAt.getTime() / 1000) - 3 * 3600;
+        }
+
+        const accessLogs = await this.controlId.getAccessLogs(deviceId, sinceId, sinceTime);
+        this.logger.log(
+          `Fetched ${accessLogs.length} access_logs from device ${device.name} (sinceId=${sinceId}, sinceTime=${sinceTime})`,
+        );
+
+        // Convert access_log entries to AfdRecord-like objects.
+        // We store punchTimeUtc directly to avoid double-adding timezone offset later.
+        records = accessLogs
+          .filter((log: any) => log.user_id != null && log.time != null)
+          .map((log: any) => {
+            const registration = userIdToReg[log.user_id] || String(log.user_id);
+            const punchDate = this.controlId.accessLogToUtcDate(log.time as number);
+
+            return {
+              nsr: String(log.id),
+              type: '3',
+              date: '',  // not used — punchTimeUtc below takes precedence
+              time: '',  // not used
+              pis: registration,
+              raw: JSON.stringify(log),
+              accessLogId: log.id as number,
+              punchTimeUtc: punchDate,  // pre-computed UTC Date
+            };
+          });
+
+        this.logger.log(
+          `Converted ${records.length} access_logs to punch records for device ${device.name}`,
+        );
+      } else {
+        throw afdError;
+      }
+    }
 
     if (records.length === 0) {
       await this.prisma.deviceSyncLog.create({
@@ -196,7 +271,11 @@ export class AutoSyncService {
 
     for (const record of records) {
       try {
-        const punchTime = this.controlId.afdToUtcDate(record.date, record.time);
+        // Use pre-computed UTC date (access_logs path) or convert from AFD ddmmyyyy/hhmm
+        const punchTime: Date =
+          (record as any).punchTimeUtc instanceof Date
+            ? (record as any).punchTimeUtc
+            : this.controlId.afdToUtcDate(record.date, record.time);
 
         // Find employee by PIS or registration
         const employeeId = pisToEmployee[record.pis] || regToEmployee[record.pis] || null;
@@ -219,19 +298,25 @@ export class AutoSyncService {
         }
 
         // Create raw punch event
+        const rawData: any = {
+          nsr: record.nsr,
+          pis: record.pis,
+          originalDate: record.date,
+          originalTime: record.time,
+          raw: record.raw,
+        };
+        // Store access log ID for incremental sync on next run
+        if ((record as any).accessLogId != null) {
+          rawData.accessLogId = (record as any).accessLogId;
+        }
+
         const rawPunch = await this.prisma.rawPunchEvent.create({
           data: {
             deviceId,
             employeeId,
             punchTime,
             source: 'DEVICE',
-            rawData: {
-              nsr: record.nsr,
-              pis: record.pis,
-              originalDate: record.date,
-              originalTime: record.time,
-              raw: record.raw,
-            },
+            rawData,
             importedAt: new Date(),
           },
         });

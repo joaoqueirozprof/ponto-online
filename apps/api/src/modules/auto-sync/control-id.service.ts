@@ -471,16 +471,39 @@ export class ControlIdService {
   }
 
   /**
-   * Get access logs from device (alternative to AFD)
+   * Get access logs from device (alternative to AFD).
+   * Used for devices that don't support export_afd.fcgi.
+   *
+   * @param sinceId  Fetch only logs with id >= sinceId (incremental sync)
+   * @param sinceTime Fetch only logs with time >= sinceTime (Unix seconds, fallback)
    */
-  async getAccessLogs(deviceId: string, limit?: number, offset?: number): Promise<any[]> {
+  async getAccessLogs(
+    deviceId: string,
+    sinceId?: number,
+    sinceTime?: number,
+    limit = 1000,
+  ): Promise<any[]> {
     const body: any = {
       object: 'access_logs',
+      limit,
     };
-    if (limit) body.limit = limit;
-    if (offset) body.offset = offset;
+
+    if (sinceId !== undefined) {
+      body.where = { access_logs: { id: { '>=': sinceId } } };
+    } else if (sinceTime !== undefined) {
+      body.where = { access_logs: { time: { '>=': sinceTime } } };
+    }
 
     const result = await this.request(deviceId, 'load_objects.fcgi', body);
     return result?.access_logs || [];
+  }
+
+  /**
+   * Convert an access_log Unix timestamp (BRT, UTC-3) to a UTC Date.
+   * Control iD stores timestamps in local time but encodes them as if they were UTC,
+   * so we add 3 hours to get real UTC.
+   */
+  accessLogToUtcDate(unixTs: number): Date {
+    return new Date((unixTs + 3 * 3600) * 1000);
   }
 }
