@@ -63,6 +63,30 @@ function rawHttpPost(
         port,
         rejectUnauthorized: false,
         timeout: timeoutMs,
+        // Support legacy TLS versions (Control iD older firmware uses TLS 1.0/1.1)
+        minVersion: 'TLSv1' as any,
+        ciphers: [
+          'TLS_AES_256_GCM_SHA384',
+          'TLS_CHACHA20_POLY1305_SHA256',
+          'TLS_AES_128_GCM_SHA256',
+          'ECDHE-RSA-AES256-GCM-SHA384',
+          'ECDHE-RSA-AES128-GCM-SHA256',
+          'ECDHE-RSA-AES256-SHA384',
+          'ECDHE-RSA-AES128-SHA256',
+          'ECDHE-RSA-AES256-SHA',
+          'ECDHE-RSA-AES128-SHA',
+          'DHE-RSA-AES256-GCM-SHA384',
+          'DHE-RSA-AES128-GCM-SHA256',
+          'DHE-RSA-AES256-SHA256',
+          'DHE-RSA-AES128-SHA256',
+          'DHE-RSA-AES256-SHA',
+          'DHE-RSA-AES128-SHA',
+          'AES256-SHA256',
+          'AES128-SHA256',
+          'AES256-SHA',
+          'AES128-SHA',
+          'DES-CBC3-SHA',
+        ].join(':'),
       });
     } else {
       socket = net.createConnection({ host, port });
