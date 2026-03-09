@@ -2,8 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as http from 'http';
 import * as https from 'https';
-import * as net from 'net';
-import * as tls from 'tls';
 
 export interface ControlIdSession {
   deviceId: string;
@@ -31,38 +29,68 @@ export interface ControlIdUser {
 }
 
 /**
- * Raw TCP/TLS HTTP POST — bypasses Node.js strict HTTP parser.
- * Control iD devices use LF (\n) instead of CRLF (\r\n) in HTTP responses,
- * which causes Node's built-in http/https modules to throw parse errors.
- * This function uses raw socket I/O and parses the response manually.
- *
- * NOTE: For TLS, we only attach the 'secureConnect' listener (not 'connect')
- * to avoid accidentally removing Node.js internal TLS handshake listeners.
- * OPENSSL_CONF must point to openssl_legacy.cnf for TLS 1.0/legacy cipher support.
+ * Parse a raw HTTP response string (supports both CRLF and LF line endings).
+ * Control iD devices use LF (\n) instead of CRLF (\r\n) in HTTP responses.
  */
-function rawHttpPost(
-  host: string,
-  port: number,
-  path: string,
-  body: string,
-  useHttps: boolean,
+function parseRawHttpResponse(raw: string): { status: number; data: string } {
+  let sepIdx = raw.indexOf('\r\n\r\n');
+  if (sepIdx !== -1) {
+    sepIdx += 4;
+  } else {
+    const lfIdx = raw.indexOf('\n\n');
+    sepIdx = lfIdx !== -1 ? lfIdx + 2 : -1;
+  }
+
+  if (sepIdx === -1) {
+    return { status: 0, data: raw };
+  }
+
+  const headerPart = raw.substring(0, sepIdx);
+  const responseBody = raw.substring(sepIdx);
+
+  const firstLine = headerPart.split(/\r?\n/)[0] || '';
+  const statusMatch = firstLine.match(/HTTP\/[\d.]+ (\d+)/);
+  const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+
+  return { status, data: responseBody };
+}
+
+/**
+ * HTTP/HTTPS POST using Node.js's built-in http/https modules.
+ *
+ * Control iD devices use LF (\n) instead of CRLF (\r\n) in HTTP responses,
+ * causing Node.js's HTTP parser to throw HPE_LF_EXPECTED errors. We recover
+ * from this by reading the rawPacket from the parse error object, which contains
+ * the complete HTTP response. This approach leverages Node.js's native TLS stack
+ * (proven to work with these devices) while handling the LF line ending quirk.
+ */
+function httpPost(
+  url: string,
+  body?: any,
   timeoutMs = 30000,
 ): Promise<{ status: number; data: string }> {
   return new Promise((resolve, reject) => {
-    const request = [
-      `POST ${path} HTTP/1.0`,
-      `Host: ${host}`,
-      'Content-Type: application/json',
-      `Content-Length: ${Buffer.byteLength(body)}`,
-      'Connection: close',
-      '',
-      body,
-    ].join('\r\n');
+    const parsed = new URL(url);
+    const isHttps = parsed.protocol === 'https:';
+    const port = parsed.port ? parseInt(parsed.port) : (isHttps ? 443 : 80);
+    const postData = body ? JSON.stringify(body) : '';
 
-    let socket: net.Socket;
-    let rawData = Buffer.alloc(0);
+    const lib: typeof http | typeof https = isHttps ? https : http;
+    const options = {
+      hostname: parsed.hostname,
+      port,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+        'Connection': 'close',
+      },
+      // TLS options (for https)
+      rejectUnauthorized: false,
+    };
+
     let settled = false;
-
     const settle = (err: Error | null, result?: { status: number; data: string }) => {
       if (settled) return;
       settled = true;
@@ -72,110 +100,79 @@ function rawHttpPost(
     };
 
     const timer = setTimeout(() => {
-      socket.destroy();
+      req.destroy();
       settle(new Error(`Request timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    if (useHttps) {
-      // TLS socket — write ONLY after secureConnect (full handshake complete)
-      // Do NOT attach 'connect' listener here: it fires before TLS handshake
-      // and calling removeAllListeners() can break Node.js internal TLS setup.
-      //
-      // NOTE: Do NOT set minVersion here — TLS 1.2 is confirmed working with this
-      // device via the https module. minVersion: 'TLSv1' causes silent failures in
-      // OpenSSL 3.x. Legacy support is configured via OPENSSL_CONF env variable.
-      socket = tls.connect({
-        host,
-        port,
-        rejectUnauthorized: false,
-      });
-
-      (socket as tls.TLSSocket).on('secureConnect', () => {
-        socket.write(request);
-      });
-    } else {
-      // Plain TCP socket
-      socket = net.createConnection({ host, port });
-      socket.setTimeout(timeoutMs);
-
-      socket.on('connect', () => {
-        socket.write(request);
-      });
-    }
-
-    socket.on('data', (chunk) => {
-      rawData = Buffer.concat([rawData, chunk]);
-    });
-
-    socket.on('end', () => {
-      if (settled) return;
-      try {
-        const raw = rawData.toString('utf8');
-        // Split headers from body — handle both CRLF and LF line endings
-        let sepIdx = raw.indexOf('\r\n\r\n');
-        if (sepIdx !== -1) {
-          sepIdx += 4;
-        } else {
-          const lfIdx = raw.indexOf('\n\n');
-          sepIdx = lfIdx !== -1 ? lfIdx + 2 : -1;
-        }
-
-        if (sepIdx === -1) {
-          // Empty or malformed response (e.g. TLS alert with no HTTP)
-          settle(null, { status: 0, data: raw });
-          return;
-        }
-
-        const headerPart = raw.substring(0, sepIdx);
-        const responseBody = raw.substring(sepIdx);
-
-        // Parse status code from first line
-        const firstLine = headerPart.split(/\r?\n/)[0] || '';
-        const statusMatch = firstLine.match(/HTTP\/[\d.]+ (\d+)/);
-        const status = statusMatch ? parseInt(statusMatch[1]) : 0;
-
-        // Handle redirect via Location header
-        const locationMatch = headerPart.match(/[Ll]ocation:\s*(.+?)[\r\n]/);
-        if (locationMatch && [301, 302, 303, 307, 308].includes(status)) {
-          const location = locationMatch[1].trim();
-          const redirectUrl = location.startsWith('http')
-            ? location
-            : `${useHttps ? 'https' : 'http'}://${host}:${port}${location}`;
-          const rParsed = new URL(redirectUrl);
-          const rPort = parseInt(rParsed.port) || (rParsed.protocol === 'https:' ? 443 : 80);
-          rawHttpPost(rParsed.hostname, rPort, rParsed.pathname + rParsed.search, body, rParsed.protocol === 'https:', timeoutMs)
-            .then(r => settle(null, r))
-            .catch(e => settle(e));
-          return;
-        }
-
-        settle(null, { status, data: responseBody });
-      } catch (err: any) {
-        settle(err);
+    const req = (lib as any).request(options, (res: http.IncomingMessage) => {
+      // Handle redirect
+      if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        const location = res.headers.location;
+        const redirectUrl = location.startsWith('http')
+          ? location
+          : `${parsed.protocol}//${parsed.hostname}:${port}${location}`;
+        httpPost(redirectUrl, body, timeoutMs)
+          .then(r => settle(null, r))
+          .catch(e => settle(e));
+        return;
       }
+
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => settle(null, { status: res.statusCode || 0, data }));
     });
 
-    socket.on('error', (err) => {
+    req.on('error', (err: any) => {
+      // Control iD devices send LF (\n) instead of CRLF (\r\n) in HTTP responses.
+      // Node.js HTTP parser rejects this with HPE_LF_EXPECTED.
+      // The rawPacket property contains the full raw response bytes — parse it manually.
+      if (err.rawPacket) {
+        const raw = Buffer.isBuffer(err.rawPacket)
+          ? err.rawPacket.toString('utf8')
+          : String(err.rawPacket);
+        try {
+          const result = parseRawHttpResponse(raw);
+
+          // Handle redirect in raw response
+          const headerEnd = raw.indexOf('\n\n') !== -1
+            ? raw.indexOf('\n\n')
+            : raw.indexOf('\r\n\r\n');
+          if (headerEnd !== -1 && result.status && [301, 302, 303, 307, 308].includes(result.status)) {
+            const headerPart = raw.substring(0, headerEnd);
+            const locationMatch = headerPart.match(/[Ll]ocation:\s*(.+?)[\r\n]/);
+            if (locationMatch) {
+              const location = locationMatch[1].trim();
+              const redirectUrl = location.startsWith('http')
+                ? location
+                : `${parsed.protocol}//${parsed.hostname}:${port}${location}`;
+              httpPost(redirectUrl, body, timeoutMs)
+                .then(r => settle(null, r))
+                .catch(e => settle(e));
+              return;
+            }
+          }
+
+          settle(null, result);
+          return;
+        } catch {
+          // Fall through to reject with original error
+        }
+      }
       settle(err);
     });
 
-    socket.on('timeout', () => {
-      socket.destroy();
-      settle(new Error(`Socket timeout after ${timeoutMs}ms`));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      settle(new Error(`Request timeout after ${timeoutMs}ms`));
     });
-  });
-}
 
-/**
- * Wrapper to call rawHttpPost from a URL string
- */
-function httpPost(url: string, body?: any, timeoutMs = 30000): Promise<{ status: number; data: string }> {
-  const parsed = new URL(url);
-  const isHttps = parsed.protocol === 'https:';
-  const port = parsed.port ? parseInt(parsed.port) : (isHttps ? 443 : 80);
-  const path = parsed.pathname + parsed.search;
-  const postData = body ? JSON.stringify(body) : '';
-  return rawHttpPost(parsed.hostname, port, path, postData, isHttps, timeoutMs);
+    if (postData) {
+      req.write(postData);
+    }
+    req.end();
+  });
 }
 
 /**
