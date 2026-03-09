@@ -52,6 +52,9 @@ services:
       JWT_SECRET: "ponto-jwt-secret-2026-prod"
       JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-prod"
       CORS_ORIGIN: "http://72.61.129.78:3010"
+      # Habilita TLS legado para compatibilidade com Control iD firmware antigo (TLS 1.0/1.1)
+      NODE_OPTIONS: "--tls-min-v1.0 --openssl-legacy-provider"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       ponto-db:
         condition: service_healthy
