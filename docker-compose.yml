@@ -37,8 +37,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        CACHEBUST: "56"
-    image: ponto-api:v56
+        CACHEBUST: "57"
+    image: ponto-api:v57
     container_name: ponto-api
     restart: always
     ports:
@@ -52,8 +52,10 @@ services:
       JWT_SECRET: "ponto-jwt-secret-2026-prod"
       JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-prod"
       CORS_ORIGIN: "http://72.61.129.78:3010"
-      # Habilita TLS legado para compatibilidade com Control iD firmware antigo (TLS 1.0/1.1)
-      NODE_OPTIONS: "--tls-min-v1.0 --openssl-legacy-provider"
+      # TLS legado: habilita TLS 1.0/1.1 e cifras antigas para Control iD firmware antigo
+      # OPENSSL_CONF aponta para config com MinProtocol=TLSv1 e SECLEVEL=0 (legacy ciphers)
+      OPENSSL_CONF: "/app/openssl_legacy.cnf"
+      NODE_OPTIONS: "--tls-min-v1.0"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       ponto-db:

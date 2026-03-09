@@ -5,6 +5,11 @@ WORKDIR /app
 # Install OpenSSL for Prisma + PostgreSQL client for direct SQL migration
 RUN apk add --no-cache openssl postgresql-client
 
+# OpenSSL legacy config: enables TLS 1.0 and old cipher suites
+# for Control iD biometric reader compatibility (old firmware)
+COPY apps/api/openssl_legacy.cnf /app/openssl_legacy.cnf
+ENV OPENSSL_CONF=/app/openssl_legacy.cnf
+
 # Copy API package and install all deps
 COPY apps/api/package.json ./
 RUN npm install

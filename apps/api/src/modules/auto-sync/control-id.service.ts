@@ -35,6 +35,10 @@ export interface ControlIdUser {
  * Control iD devices use LF (\n) instead of CRLF (\r\n) in HTTP responses,
  * which causes Node's built-in http/https modules to throw parse errors.
  * This function uses raw socket I/O and parses the response manually.
+ *
+ * NOTE: For TLS, we only attach the 'secureConnect' listener (not 'connect')
+ * to avoid accidentally removing Node.js internal TLS handshake listeners.
+ * OPENSSL_CONF must point to openssl_legacy.cnf for TLS 1.0/legacy cipher support.
  */
 function rawHttpPost(
   host: string,
@@ -56,63 +60,46 @@ function rawHttpPost(
     ].join('\r\n');
 
     let socket: net.Socket;
+    let rawData = Buffer.alloc(0);
+    let settled = false;
+
+    const settle = (err: Error | null, result?: { status: number; data: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(result!);
+    };
+
+    const timer = setTimeout(() => {
+      socket.destroy();
+      settle(new Error(`Request timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
 
     if (useHttps) {
+      // TLS socket — write ONLY after secureConnect (full handshake complete)
+      // Do NOT attach 'connect' listener here: it fires before TLS handshake
+      // and calling removeAllListeners() can break Node.js internal TLS setup.
       socket = tls.connect({
         host,
         port,
         rejectUnauthorized: false,
-        timeout: timeoutMs,
-        // Support legacy TLS versions (Control iD older firmware uses TLS 1.0/1.1)
+        // Legacy TLS support (Control iD old firmware). Also set via OPENSSL_CONF.
         minVersion: 'TLSv1' as any,
-        ciphers: [
-          'TLS_AES_256_GCM_SHA384',
-          'TLS_CHACHA20_POLY1305_SHA256',
-          'TLS_AES_128_GCM_SHA256',
-          'ECDHE-RSA-AES256-GCM-SHA384',
-          'ECDHE-RSA-AES128-GCM-SHA256',
-          'ECDHE-RSA-AES256-SHA384',
-          'ECDHE-RSA-AES128-SHA256',
-          'ECDHE-RSA-AES256-SHA',
-          'ECDHE-RSA-AES128-SHA',
-          'DHE-RSA-AES256-GCM-SHA384',
-          'DHE-RSA-AES128-GCM-SHA256',
-          'DHE-RSA-AES256-SHA256',
-          'DHE-RSA-AES128-SHA256',
-          'DHE-RSA-AES256-SHA',
-          'DHE-RSA-AES128-SHA',
-          'AES256-SHA256',
-          'AES128-SHA256',
-          'AES256-SHA',
-          'AES128-SHA',
-          'DES-CBC3-SHA',
-        ].join(':'),
+        secureOptions: 0x4 | 0x100, // SSL_OP_NO_SSLv3 only; allow TLS 1.0+
       });
-    } else {
-      socket = net.createConnection({ host, port });
-      socket.setTimeout(timeoutMs);
-    }
 
-    let rawData = Buffer.alloc(0);
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      socket.destroy();
-      reject(new Error(`Request timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    socket.on('connect', () => {
-      socket.write(request);
-    });
-
-    // For TLS, wait for 'secureConnect' event
-    if (useHttps) {
       (socket as tls.TLSSocket).on('secureConnect', () => {
         socket.write(request);
       });
-      // Remove the 'connect' listener to avoid double-write
-      socket.removeAllListeners('connect');
+    } else {
+      // Plain TCP socket
+      socket = net.createConnection({ host, port });
+      socket.setTimeout(timeoutMs);
+
+      socket.on('connect', () => {
+        socket.write(request);
+      });
     }
 
     socket.on('data', (chunk) => {
@@ -120,17 +107,26 @@ function rawHttpPost(
     });
 
     socket.on('end', () => {
-      clearTimeout(timer);
-      if (timedOut) return;
+      if (settled) return;
       try {
         const raw = rawData.toString('utf8');
-        // Split headers from body on \r\n\r\n or \n\n
-        const sepIdx = raw.indexOf('\r\n\r\n') !== -1
-          ? raw.indexOf('\r\n\r\n') + 4
-          : raw.indexOf('\n\n') + 2;
+        // Split headers from body — handle both CRLF and LF line endings
+        let sepIdx = raw.indexOf('\r\n\r\n');
+        if (sepIdx !== -1) {
+          sepIdx += 4;
+        } else {
+          const lfIdx = raw.indexOf('\n\n');
+          sepIdx = lfIdx !== -1 ? lfIdx + 2 : -1;
+        }
 
-        const headerPart = sepIdx > 4 ? raw.substring(0, sepIdx) : raw;
-        const responseBody = sepIdx > 4 ? raw.substring(sepIdx) : '';
+        if (sepIdx === -1) {
+          // Empty or malformed response (e.g. TLS alert with no HTTP)
+          settle(null, { status: 0, data: raw });
+          return;
+        }
+
+        const headerPart = raw.substring(0, sepIdx);
+        const responseBody = raw.substring(sepIdx);
 
         // Parse status code from first line
         const firstLine = headerPart.split(/\r?\n/)[0] || '';
@@ -146,25 +142,25 @@ function rawHttpPost(
             : `${useHttps ? 'https' : 'http'}://${host}:${port}${location}`;
           const rParsed = new URL(redirectUrl);
           const rPort = parseInt(rParsed.port) || (rParsed.protocol === 'https:' ? 443 : 80);
-          resolve(rawHttpPost(rParsed.hostname, rPort, rParsed.pathname + rParsed.search, body, rParsed.protocol === 'https:', timeoutMs));
+          rawHttpPost(rParsed.hostname, rPort, rParsed.pathname + rParsed.search, body, rParsed.protocol === 'https:', timeoutMs)
+            .then(r => settle(null, r))
+            .catch(e => settle(e));
           return;
         }
 
-        resolve({ status, data: responseBody });
+        settle(null, { status, data: responseBody });
       } catch (err: any) {
-        reject(err);
+        settle(err);
       }
     });
 
     socket.on('error', (err) => {
-      clearTimeout(timer);
-      if (!timedOut) reject(err);
+      settle(err);
     });
 
     socket.on('timeout', () => {
-      clearTimeout(timer);
       socket.destroy();
-      reject(new Error(`Socket timeout after ${timeoutMs}ms`));
+      settle(new Error(`Socket timeout after ${timeoutMs}ms`));
     });
   });
 }
