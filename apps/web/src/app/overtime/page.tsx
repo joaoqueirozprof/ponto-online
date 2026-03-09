@@ -55,6 +55,7 @@ export default function OvertimePage() {
   const [fetched, setFetched] = useState(false);
   const [filterMode, setFilterMode] = useState<'all' | 'with_overtime' | 'no_punch'>('with_overtime');
   const [minHours, setMinHours] = useState('0');
+  const [searchEmployee, setSearchEmployee] = useState('');
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -89,6 +90,9 @@ export default function OvertimePage() {
   }).filter(e => {
     const minMin = parseFloat(minHours) * 60;
     return e.overtimeMinutes >= minMin;
+  }).filter(e => {
+    if (!searchEmployee.trim()) return true;
+    return e.employee.name.toLowerCase().includes(searchEmployee.toLowerCase());
   }).sort((a, b) => b.overtimeMinutes - a.overtimeMinutes);
 
   const totalOT = filtered.reduce((s, e) => s + e.overtimeMinutes, 0);
@@ -330,6 +334,33 @@ export default function OvertimePage() {
               className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="0"
             />
+          </div>
+        </div>
+
+        {/* Employee search */}
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">Buscar Funcionario</label>
+          <div className="relative max-w-sm">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Digite o nome do funcionario..."
+              value={searchEmployee}
+              onChange={e => setSearchEmployee(e.target.value)}
+              className="w-full h-9 pl-10 pr-4 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            {searchEmployee && (
+              <button
+                onClick={() => setSearchEmployee('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
