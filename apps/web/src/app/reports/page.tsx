@@ -370,9 +370,9 @@ export default function ReportsPage() {
       e.employee.name, e.employee.cpf, e.employee.position || '', e.employee.department || '',
       fmtHHMM(e.totalWorkedMinutes), fmtHHMM(e.totalOvertimeMinutes), fmtHHMM(e.totalNightMinutes),
       fmtHHMM(e.totalLateMinutes), fmtHHMM(e.totalAbsenceMinutes), fmtHHMM(e.totalBalanceMinutes),
-      e.daysWorked, e.hasPunches ? 'Sim' : 'Não', e.status,
+      e.daysWorked, e.hasPunches ? 'Sim' : 'Nao', e.status,
     ]);
-    downloadCSV(\`relatorio_filial_\${branch.replace(/\s+/g,'-')}_\${monthName}_\${brData.year}.csv\`, header, rows as any);
+    downloadCSV(`relatorio_filial_${branch.replace(/\s+/g,'-')}_${monthName}_${brData.year}.csv`, header, rows as any);
   };
 
   const dayRowClass = (status: string, idx: number): string => {
