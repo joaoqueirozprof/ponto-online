@@ -80,13 +80,14 @@ function rawHttpPost(
       // TLS socket — write ONLY after secureConnect (full handshake complete)
       // Do NOT attach 'connect' listener here: it fires before TLS handshake
       // and calling removeAllListeners() can break Node.js internal TLS setup.
+      //
+      // NOTE: Do NOT set minVersion here — TLS 1.2 is confirmed working with this
+      // device via the https module. minVersion: 'TLSv1' causes silent failures in
+      // OpenSSL 3.x. Legacy support is configured via OPENSSL_CONF env variable.
       socket = tls.connect({
         host,
         port,
         rejectUnauthorized: false,
-        // Legacy TLS support (Control iD old firmware). Also set via OPENSSL_CONF.
-        minVersion: 'TLSv1' as any,
-        secureOptions: 0x4 | 0x100, // SSL_OP_NO_SSLv3 only; allow TLS 1.0+
       });
 
       (socket as tls.TLSSocket).on('secureConnect', () => {
