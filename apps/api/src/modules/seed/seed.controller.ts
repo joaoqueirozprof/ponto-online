@@ -44,6 +44,17 @@ export class SeedController {
     }
   }
 
+  @Post('query-sql')
+  @ApiOperation({ summary: 'Execute raw SQL query and return results (TEMPORARY)' })
+  async querySql(@Body() body: { sql: string }) {
+    try {
+      const result = await this.prisma.$queryRawUnsafe(body.sql);
+      return { data: result };
+    } catch (err: any) {
+      return { error: err.message };
+    }
+  }
+
   @Post('bulk-insert')
   @ApiOperation({ summary: 'Bulk insert seed data (TEMPORARY)' })
   async bulkInsert(@Body() body: {
