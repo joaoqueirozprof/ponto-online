@@ -213,15 +213,11 @@ export class AutoSyncService {
       records = this.controlId.parseAfdRecords(afdText);
       this.logger.log(`Parsed ${records.length} AFD records from device ${device.name}`);
 
-      // If AFD returned 0 new records, also try access_logs as supplemental source.
-      // Some devices (e.g. iDClass) store current punches in access_logs but keep
-      // only old/legacy data in AFD format.
-      if (records.length === 0) {
-        this.logger.log(
-          `AFD returned 0 new records for device ${device.name} — checking access_logs as supplemental source`,
-        );
-        useAccessLogs = true;
-      }
+      // ALWAYS also check access_logs as supplemental source.
+      // Control ID iDClass devices store current-day punches ONLY in access_logs,
+      // while AFD contains only historical/legacy data. We merge both sources
+      // and the deduplication logic downstream handles overlaps.
+      useAccessLogs = true;
     } catch (afdError: any) {
       if (
         afdError.message?.includes('400') ||
@@ -238,7 +234,7 @@ export class AutoSyncService {
       }
     }
 
-    // Fetch access_logs when AFD is empty or unsupported
+    // ALWAYS fetch access_logs as supplemental source (merges with AFD records)
     if (useAccessLogs) {
       try {
         // Load device users to map user_id → registration (PIS)
@@ -271,7 +267,7 @@ export class AutoSyncService {
 
         // Convert access_log entries to AfdRecord-like objects.
         // We store punchTimeUtc directly to avoid double-adding timezone offset later.
-        records = accessLogs
+        const accessRecords = accessLogs
           .filter((log: any) => log.user_id != null && log.time != null)
           .map((log: any) => {
             const registration = userIdToReg[log.user_id] || String(log.user_id);
@@ -290,16 +286,20 @@ export class AutoSyncService {
           });
 
         this.logger.log(
-          `Converted ${records.length} access_logs to punch records for device ${device.name}`,
+          `Converted ${accessRecords.length} access_logs to punch records for device ${device.name}`,
         );
+
+        // APPEND access_log records to AFD records (merge both sources).
+        // Deduplication happens downstream when checking existing rawPunchEvents.
+        records = [...records, ...accessRecords];
       } catch (accessError: any) {
         this.logger.error(
           `Failed to fetch access_logs from device ${device.name}: ${accessError.message}`,
         );
-        // If access_logs also fails and we have no AFD records, records stays empty
-        if (records.length === 0) {
-          records = [];
-        }
+        // If access_logs fails, we still keep whatever AFD records we have
+        this.logger.warn(
+          `Continuing with ${records.length} AFD-only records for device ${device.name}`,
+        );
       }
     }
 
