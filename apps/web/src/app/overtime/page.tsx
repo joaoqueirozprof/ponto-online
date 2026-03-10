@@ -241,6 +241,209 @@ function PunchDetailModal({
   const totalAbs = filteredDays.reduce((s, d) => s + d.absenceMinutes, 0);
   const totalLate = filteredDays.reduce((s, d) => s + d.lateMinutes, 0);
   const totalWorked = filteredDays.reduce((s, d) => s + d.workedMinutes, 0);
+  const totalExpected = filteredDays.reduce((s, d) => s + d.expectedMinutes, 0);
+
+  const mLabel = MONTHS.find(m => m.value === month)?.label || month;
+
+  const generateEmployeePDF = () => {
+    const allDays = emp.dayDetails || [];
+    const tWorked = allDays.reduce((s, d) => s + d.workedMinutes, 0);
+    const tExpected = allDays.reduce((s, d) => s + d.expectedMinutes, 0);
+    const tOT = allDays.reduce((s, d) => s + d.overtimeMinutes, 0);
+    const tAbs = allDays.reduce((s, d) => s + d.absenceMinutes, 0);
+    const tLate = allDays.reduce((s, d) => s + d.lateMinutes, 0);
+    const tNet = Math.max(0, tOT - tAbs);
+    const daysWorked = allDays.filter(d => d.workedMinutes > 0).length;
+    const daysAbsent = allDays.filter(d => d.status === 'ABSENCE').length;
+
+    const rowsHtml = allDays.map(d => {
+      const dateF = d.date.split('-').reverse().join('/');
+      const dow = DOW_NAMES[d.dayOfWeek];
+      const isWeekend = d.status === 'WEEKEND' || d.status === 'HOLIDAY';
+      const isAbsence = d.status === 'ABSENCE';
+      const rowStyle = isWeekend ? 'background:#f8fafc;color:#94a3b8;' : isAbsence ? 'background:#fef2f2;' : '';
+
+      const punchesStr = d.punches.length === 0 ? '—' :
+        d.punches
+          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+          .map(p => `${fmtBrtTime(p.time)} ${punchLabel(p.type)}`)
+          .join(' · ');
+
+      const statusMap: Record<string, string> = {
+        NORMAL: 'Normal', WEEKEND: 'Fim de Semana', HOLIDAY: 'Feriado',
+        ABSENCE: 'Falta', INCOMPLETE: 'Incompleto',
+      };
+
+      return `<tr style="${rowStyle}">
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;font-family:monospace">${dateF}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px">${dow}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:10px">${statusMap[d.status] || d.status}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:10px;color:#475569">${punchesStr}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;text-align:right;font-family:monospace">${fmtHHMM(d.workedMinutes)}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;text-align:right;font-family:monospace;color:#94a3b8">${fmtHHMM(d.expectedMinutes)}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;text-align:right;font-family:monospace;color:${d.overtimeMinutes > 0 ? '#16a34a' : '#cbd5e1'}">${d.overtimeMinutes > 0 ? fmtHHMM(d.overtimeMinutes) : '—'}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;text-align:right;font-family:monospace;color:${d.absenceMinutes > 0 ? '#dc2626' : '#cbd5e1'}">${d.absenceMinutes > 0 ? fmtHHMM(d.absenceMinutes) : '—'}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;text-align:right;font-family:monospace;color:${d.lateMinutes > 0 ? '#d97706' : '#cbd5e1'}">${d.lateMinutes > 0 ? fmtHHMM(d.lateMinutes) : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    // Adjustments section
+    const adjHtml = adjustments.length > 0 ? `
+      <div style="margin-top:16px;padding:10px 14px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px">
+        <p style="font-size:11px;font-weight:700;color:#3730a3;margin-bottom:6px">Ajustes Realizados pelo RH:</p>
+        ${adjustments.map(a => `
+          <p style="font-size:10px;color:#4338ca;margin:3px 0">
+            <strong>${a.field === 'overtime' ? 'Horas Extras' : a.field === 'absence' ? 'Faltas' : 'Atrasos'}:</strong>
+            ${fmtHHMM(a.originalMinutes)} → <strong>${fmtHHMM(a.adjustedMinutes)}</strong>
+            — Motivo: <em>"${a.reason}"</em>
+            (${a.adjustedBy || 'RH'}${a.createdAt ? ' em ' + new Date(a.createdAt).toLocaleDateString('pt-BR') : ''})
+          </p>
+        `).join('')}
+      </div>
+    ` : '';
+
+    const html = `<!DOCTYPE html><html><head>
+      <meta charset="UTF-8">
+      <title>Conferência — ${emp.employee.name} — ${mLabel}/${year}</title>
+      <style>
+        @media print { #toolbar { display: none !important; } body { margin: 0; } }
+        @page { margin: 12mm; size: A4 portrait; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1e293b; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        thead tr { background: #f1f5f9; }
+        th { padding: 6px; text-align: left; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #475569; border-bottom: 2px solid #cbd5e1; }
+        th.r { text-align: right; }
+        tfoot td { padding: 6px; font-weight: 700; border-top: 2px solid #94a3b8; font-size: 11px; }
+      </style>
+    </head><body>
+
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:3px solid #4f46e5;margin-bottom:14px">
+        <div>
+          <h1 style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:2px">Relatório Individual de Ponto</h1>
+          <p style="font-size:11px;color:#64748b">Conferência de batidas, horas extras e faltas</p>
+        </div>
+        <div style="text-align:right">
+          <p style="font-size:13px;font-weight:700;color:#4f46e5">${mLabel} / ${year}</p>
+          <p style="font-size:9px;color:#94a3b8">Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+        </div>
+      </div>
+
+      <!-- Employee info -->
+      <div style="display:flex;gap:20px;margin-bottom:14px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <div style="flex:1">
+          <p style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px">Colaborador</p>
+          <p style="font-size:14px;font-weight:700;color:#0f172a">${emp.employee.name}</p>
+        </div>
+        <div>
+          <p style="font-size:9px;color:#94a3b8;text-transform:uppercase">Cargo</p>
+          <p style="font-size:12px;font-weight:600;color:#334155">${emp.employee.position || '—'}</p>
+        </div>
+        <div>
+          <p style="font-size:9px;color:#94a3b8;text-transform:uppercase">CPF</p>
+          <p style="font-size:12px;font-weight:600;color:#334155;font-family:monospace">${emp.employee.cpf}</p>
+        </div>
+      </div>
+
+      <!-- Summary cards -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:100px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;text-align:center">
+          <p style="font-size:8px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px">Trabalhadas</p>
+          <p style="font-size:18px;font-weight:800;color:#0f172a;font-family:monospace">${fmtHHMM(tWorked)}</p>
+        </div>
+        <div style="flex:1;min-width:100px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;text-align:center">
+          <p style="font-size:8px;color:#94a3b8;text-transform:uppercase">Previstas</p>
+          <p style="font-size:18px;font-weight:800;color:#64748b;font-family:monospace">${fmtHHMM(tExpected)}</p>
+        </div>
+        <div style="flex:1;min-width:100px;padding:8px 10px;border:1px solid #86efac;border-radius:8px;text-align:center">
+          <p style="font-size:8px;color:#16a34a;text-transform:uppercase;font-weight:600">H.E. Brutas</p>
+          <p style="font-size:18px;font-weight:800;color:#16a34a;font-family:monospace">${fmtHHMM(tOT)}</p>
+        </div>
+        <div style="flex:1;min-width:100px;padding:8px 10px;border:1px solid #fecaca;border-radius:8px;text-align:center">
+          <p style="font-size:8px;color:#dc2626;text-transform:uppercase;font-weight:600">Faltas</p>
+          <p style="font-size:18px;font-weight:800;color:#dc2626;font-family:monospace">${fmtHHMM(tAbs)}</p>
+        </div>
+        <div style="flex:1;min-width:100px;padding:8px 10px;border:2px solid #fbbf24;border-radius:8px;text-align:center">
+          <p style="font-size:8px;color:#d97706;text-transform:uppercase;font-weight:700">H.E. Líquidas</p>
+          <p style="font-size:18px;font-weight:800;color:#d97706;font-family:monospace">${fmtHHMM(tNet)}</p>
+        </div>
+      </div>
+
+      <!-- Calculation explanation -->
+      <div style="padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;margin-bottom:14px;font-size:11px;color:#92400e">
+        <strong>Cálculo:</strong>
+        <span style="font-family:monospace;font-weight:700;color:#16a34a">${fmtHHMM(tOT)}</span> (brutas)
+        − <span style="font-family:monospace;font-weight:700;color:#dc2626">${fmtHHMM(tAbs)}</span> (faltas)
+        = <span style="font-family:monospace;font-weight:700;color:#d97706">${fmtHHMM(tNet)}</span> (líquidas)
+        · Dias trabalhados: <strong>${daysWorked}</strong> · Dias de falta: <strong>${daysAbsent}</strong> · Atrasos: <strong>${fmtHHMM(tLate)}</strong>
+      </div>
+
+      ${adjHtml}
+
+      <!-- Daily table -->
+      <table style="margin-top:${adjustments.length > 0 ? '14px' : '0'}">
+        <thead>
+          <tr>
+            <th>Data</th><th>Dia</th><th>Status</th><th>Batidas</th>
+            <th class="r">Trabalhadas</th><th class="r">Previstas</th>
+            <th class="r" style="color:#16a34a">H. Extra</th>
+            <th class="r" style="color:#dc2626">Falta</th>
+            <th class="r" style="color:#d97706">Atraso</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>
+          <tr style="background:#f1f5f9">
+            <td colspan="4" style="padding:6px;font-size:10px;color:#475569;text-transform:uppercase">Total do Mês</td>
+            <td style="padding:6px;text-align:right;font-family:monospace;color:#0f172a">${fmtHHMM(tWorked)}</td>
+            <td style="padding:6px;text-align:right;font-family:monospace;color:#64748b">${fmtHHMM(tExpected)}</td>
+            <td style="padding:6px;text-align:right;font-family:monospace;color:#16a34a">${fmtHHMM(tOT)}</td>
+            <td style="padding:6px;text-align:right;font-family:monospace;color:#dc2626">${fmtHHMM(tAbs)}</td>
+            <td style="padding:6px;text-align:right;font-family:monospace;color:#d97706">${fmtHHMM(tLate)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <!-- Signature area -->
+      <div style="margin-top:40px;display:flex;gap:40px;justify-content:center">
+        <div style="text-align:center;width:220px">
+          <div style="border-top:1px solid #334155;padding-top:6px">
+            <p style="font-size:10px;font-weight:600;color:#334155">${emp.employee.name}</p>
+            <p style="font-size:9px;color:#94a3b8">Colaborador</p>
+          </div>
+        </div>
+        <div style="text-align:center;width:220px">
+          <div style="border-top:1px solid #334155;padding-top:6px">
+            <p style="font-size:10px;font-weight:600;color:#334155">Responsável RH</p>
+            <p style="font-size:9px;color:#94a3b8">Departamento Pessoal</p>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;font-size:8px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:6px">
+        Ponto Online v70 — Relatório individual gerado automaticamente · ${mLabel}/${year}
+        · Este documento pode ser utilizado para conferência e eventual contestação junto ao RH.
+      </div>
+
+      <!-- Print toolbar -->
+      <script>function imprimirDoc(){document.getElementById('toolbar').style.display='none';window.print();document.getElementById('toolbar').style.display='flex';}</script>
+      <div id="toolbar" style="position:fixed;top:0;left:0;right:0;background:#4f46e5;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:white;font-size:13px;font-weight:600">Relatório de ${emp.employee.name}</span>
+          <span style="color:rgba(255,255,255,0.7);font-size:11px">${mLabel}/${year} · Imprima ou salve como PDF</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="imprimirDoc()" style="background:white;color:#4f46e5;border:none;padding:8px 20px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Imprimir / Salvar PDF</button>
+          <button onclick="window.close()" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer">Fechar</button>
+        </div>
+      </div>
+      <div style="height:50px"></div>
+    </body></html>`;
+
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
@@ -251,14 +454,26 @@ function PunchDetailModal({
             <h2 className="text-lg font-bold text-slate-900">{emp.employee.name}</h2>
             <p className="text-sm text-slate-500">{emp.employee.position || 'Sem cargo'} — CPF: {emp.employee.cpf}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generateEmployeePDF}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              title="Gerar PDF para impressão"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Imprimir PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Summary row */}
@@ -505,12 +720,23 @@ function PunchDetailModal({
           <p className="text-xs text-slate-400">
             {filteredDays.length} dias exibidos · Total trabalhado: {fmtHHMM(totalWorked)}
           </p>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
-          >
-            Fechar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generateEmployeePDF}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Imprimir PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       </div>
     </div>
