@@ -19,7 +19,7 @@ COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Copy config and source - CACHEBUST forces rebuild from here
-ARG CACHEBUST=64
+ARG CACHEBUST=65
 RUN echo "CACHEBUST=${CACHEBUST}"
 COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json

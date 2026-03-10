@@ -26,8 +26,10 @@ export class PunchesController {
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 100,
     @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.punchesService.getRawPunches(employeeId, deviceId, skip, take, search);
+    return this.punchesService.getRawPunches(employeeId, deviceId, skip, take, search, startDate, endDate);
   }
 
   @Get('normalized')
