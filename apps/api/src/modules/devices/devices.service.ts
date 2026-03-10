@@ -2,6 +2,23 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 
+/**
+ * Compute device status based on lastSyncAt.
+ * If synced within the last 60 minutes → online, otherwise → offline.
+ */
+function computeDeviceStatus(device: any): any {
+  const ONLINE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutes
+  const now = Date.now();
+  const lastSync = device.lastSyncAt ? new Date(device.lastSyncAt).getTime() : 0;
+  const isOnline = lastSync > 0 && (now - lastSync) < ONLINE_THRESHOLD_MS;
+
+  return {
+    ...device,
+    status: isOnline ? 'online' : 'offline',
+    lastSync: device.lastSyncAt || null,
+  };
+}
+
 @Injectable()
 export class DevicesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -36,7 +53,7 @@ export class DevicesService {
       ];
     }
 
-    const [data, total] = await Promise.all([
+    const [rawData, total] = await Promise.all([
       this.prisma.device.findMany({
         where,
         skip,
@@ -50,6 +67,9 @@ export class DevicesService {
       }),
       this.prisma.device.count({ where }),
     ]);
+
+    // Add computed status field for each device
+    const data = rawData.map(computeDeviceStatus);
 
     return { data, total, skip, take };
   }
@@ -70,7 +90,7 @@ export class DevicesService {
       throw new NotFoundException(`Device with ID ${id} not found`);
     }
 
-    return device;
+    return computeDeviceStatus(device);
   }
 
   async update(id: string, dto: any) {

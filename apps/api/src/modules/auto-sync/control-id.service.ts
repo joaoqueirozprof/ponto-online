@@ -254,15 +254,16 @@ export class ControlIdService {
 
   /**
    * Make authenticated request to Control ID device
+   * @param timeoutMs Request timeout in milliseconds (default 30s; use 120s for AFD exports)
    */
-  async request(deviceId: string, endpoint: string, body?: any, queryParams?: string): Promise<any> {
+  async request(deviceId: string, endpoint: string, body?: any, queryParams?: string, timeoutMs = 30000): Promise<any> {
     const session = await this.getSession(deviceId);
     const url = queryParams
       ? `${session.baseUrl}/${endpoint}?session=${session.session}&${queryParams}`
       : `${session.baseUrl}/${endpoint}?session=${session.session}`;
 
     try {
-      const result = await httpPost(url, body);
+      const result = await httpPost(url, body, timeoutMs);
 
       if (result.status === 401 || result.status === 403) {
         // Session might have expired, retry with new login
@@ -272,7 +273,7 @@ export class ControlIdService {
           ? `${newSession.baseUrl}/${endpoint}?session=${newSession.session}&${queryParams}`
           : `${newSession.baseUrl}/${endpoint}?session=${newSession.session}`;
 
-        const retryResult = await httpPost(retryUrl, body);
+        const retryResult = await httpPost(retryUrl, body, timeoutMs);
         if (retryResult.status !== 200) {
           this.logger.error(`Retry failed for ${endpoint}: status=${retryResult.status} body=${retryResult.data?.substring(0, 200)}`);
           throw new Error(`Request failed after retry: ${retryResult.status}`);
@@ -294,22 +295,32 @@ export class ControlIdService {
   }
 
   /**
-   * Export AFD (Arquivo Fonte de Dados) from device.
+   * Export AFD (Arquivo Fonte de Dados) from device via get_afd.fcgi.
    *
-   * Always sends at least {} as body — Control iD devices return 400 when
-   * Content-Type: application/json is present but the body is empty.
+   * The correct endpoint is get_afd.fcgi (NOT export_afd.fcgi).
+   * The initial_nsr field goes INSIDE the initial_date object (confirmed via Control iD Python SDK).
+   *
+   * Request body format:
+   *   { "initial_date": { "day": 1, "month": 1, "year": 2020, "initial_nsr": 0 } }
+   *
+   * Always sends at least { "initial_date": {...} } — Control iD devices return 400
+   * when Content-Type: application/json is present but the body is empty or malformed.
    */
   async exportAfd(deviceId: string, initialDate?: { day: number; month: number; year: number }, initialNsr?: number): Promise<string> {
-    const body: any = {};
-    if (initialDate) {
-      body.initial_date = initialDate;
-    }
-    if (initialNsr) {
-      body.initial_nsr = initialNsr;
-    }
+    // Build initial_date with defaults (epoch start = get all records)
+    const dateObj = initialDate || { day: 1, month: 1, year: 2020 };
+    const body: any = {
+      initial_date: {
+        day: dateObj.day,
+        month: dateObj.month,
+        year: dateObj.year,
+        initial_nsr: initialNsr ?? 0,  // initial_nsr goes INSIDE initial_date
+      },
+    };
 
-    // Always pass body (even empty {}) to avoid 400 on Content-Type:application/json with no body
-    const afdText = await this.request(deviceId, 'export_afd.fcgi', body);
+    this.logger.log(`exportAfd: calling get_afd.fcgi with body=${JSON.stringify(body)}`);
+    // AFD generation can take up to 2 minutes for large files — use extended timeout
+    const afdText = await this.request(deviceId, 'get_afd.fcgi', body, undefined, 120000);
     return typeof afdText === 'string' ? afdText : JSON.stringify(afdText);
   }
 
@@ -471,10 +482,12 @@ export class ControlIdService {
   }
 
   /**
-   * Get access logs from device (alternative to AFD).
-   * Used for devices that don't support export_afd.fcgi.
+   * Get access logs from device (fallback when get_afd.fcgi is unavailable).
    *
-   * @param sinceId  Fetch only logs with id >= sinceId (incremental sync)
+   * Control iD load_objects.fcgi where clause uses ARRAY format:
+   *   [{"object": "access_logs", "field": "id", "operator": ">=", "value": N}]
+   *
+   * @param sinceId   Fetch only logs with id >= sinceId (incremental sync)
    * @param sinceTime Fetch only logs with time >= sinceTime (Unix seconds, fallback)
    */
   async getAccessLogs(
@@ -488,12 +501,18 @@ export class ControlIdService {
       limit,
     };
 
+    // Control iD where clause must be an ARRAY of condition objects (not nested object)
     if (sinceId !== undefined) {
-      body.where = { access_logs: { id: { '>=': sinceId } } };
+      body.where = [
+        { object: 'access_logs', field: 'id', operator: '>=', value: sinceId },
+      ];
     } else if (sinceTime !== undefined) {
-      body.where = { access_logs: { time: { '>=': sinceTime } } };
+      body.where = [
+        { object: 'access_logs', field: 'time', operator: '>=', value: sinceTime },
+      ];
     }
 
+    this.logger.debug(`getAccessLogs: body=${JSON.stringify(body)}`);
     const result = await this.request(deviceId, 'load_objects.fcgi', body);
     return result?.access_logs || [];
   }
