@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=30
+ARG CACHEBUST=31
 
 # Install ALL deps including dev
 COPY apps/web/package.json ./

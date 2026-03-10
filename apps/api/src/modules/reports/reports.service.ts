@@ -5,6 +5,7 @@ export interface DayCalc {
   date: string;
   dayOfWeek: number;
   workedMinutes: number;
+  expectedMinutes: number;
   overtimeMinutes: number;
   nightMinutes: number;
   lateMinutes: number;
@@ -38,13 +39,43 @@ const OLD_ID_MAP: Record<string, string> = {
   'cmmh3hpf10xmagw0wtnpkpzjs': 'cmmh2a0c80073bz9p67l0bxuy', // AMANDA CARVALHO
 };
 
+// ── BRT Timezone Helpers (UTC-3, no DST) ──
+const BRT_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+function utcToBrtDateStr(utcDate: Date): string {
+  const brt = new Date(utcDate.getTime() + BRT_OFFSET_MS);
+  return brt.toISOString().split('T')[0];
+}
+
+function getBrtMonthBoundsUtc(month: number, year: number): { startDate: Date; endDate: Date } {
+  // BRT month start: 1st of month 00:00 BRT = 03:00 UTC
+  const startDate = new Date(Date.UTC(year, month - 1, 1, 3, 0, 0, 0));
+  // BRT month end: last day 23:59:59.999 BRT = next month 1st 02:59:59.999 UTC
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const endDate = new Date(Date.UTC(year, month - 1, daysInMonth + 1, 2, 59, 59, 999));
+  return { startDate, endDate };
+}
+
+function getBrtTodayStr(): string {
+  return utcToBrtDateStr(new Date());
+}
+
+function makeBrtDateStr(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function brtDayOfWeek(year: number, month: number, day: number): number {
+  // 03:00 UTC on that calendar date = 00:00 BRT, so getUTCDay() gives BRT day of week
+  return new Date(Date.UTC(year, month - 1, day, 3, 0, 0)).getUTCDay();
+}
+
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Shared helper: calculate daily data from actual normalized punches for an employee in a given month.
-   * This ensures consistency across all 3 reports.
+   * Uses BRT timezone (UTC-3) for all date boundaries and grouping.
    */
   private async calculateEmployeeMonth(
     employeeId: string,
@@ -54,14 +85,15 @@ export class ReportsService {
     days: DayCalc[];
     punchesByDate: Record<string, Array<{ time: string; type: string; status: string }>>;
     totalWorkedMinutes: number;
+    totalExpectedMinutes: number;
     totalOvertimeMinutes: number;
     totalNightMinutes: number;
     totalLateMinutes: number;
     totalAbsenceMinutes: number;
     totalBalanceMinutes: number;
   }> {
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    // BRT month boundaries in UTC
+    const { startDate, endDate } = getBrtMonthBoundsUtc(month, year);
     const daysInMonth = new Date(year, month, 0).getDate();
 
     // Get employee with schedule
@@ -84,13 +116,10 @@ export class ReportsService {
       orderBy: { punchTime: 'asc' },
     });
 
-    // Group punches by date
+    // Group punches by BRT date
     const punchesByDate: Record<string, Array<{ time: string; type: string; status: string }>> = {};
     for (const punch of monthPunches) {
-      // Use Fortaleza timezone for date key
-      const punchDate = new Date(punch.punchTime);
-      const brDate = new Date(punchDate.getTime() - 3 * 60 * 60 * 1000); // UTC-3
-      const dateKey = brDate.toISOString().split('T')[0];
+      const dateKey = utcToBrtDateStr(punch.punchTime);
       if (!punchesByDate[dateKey]) punchesByDate[dateKey] = [];
       punchesByDate[dateKey].push({
         time: punch.punchTime.toISOString(),
@@ -99,7 +128,7 @@ export class ReportsService {
       });
     }
 
-    // Build schedule map
+    // Build schedule map (dayOfWeek -> scheduleEntry)
     const scheduleByDay: Record<number, any> = {};
     if (employee?.schedule?.scheduleEntries) {
       for (const entry of employee.schedule.scheduleEntries) {
@@ -115,20 +144,23 @@ export class ReportsService {
 
     const days: DayCalc[] = [];
     let totalWorked = 0;
+    let totalExpected = 0;
     let totalOvertime = 0;
     let totalLate = 0;
     let totalAbsence = 0;
     let totalNight = 0;
-    const today = new Date();
+    const todayStr = getBrtTodayStr();
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day);
-      const dateStr = date.toISOString().split('T')[0];
-      const dayOfWeek = date.getDay();
+      const dateStr = makeBrtDateStr(year, month, day);
+      const dayOfWeek = brtDayOfWeek(year, month, day);
       const dayPunches = punchesByDate[dateStr] || [];
       const scheduleEntry = scheduleByDay[dayOfWeek];
       const isHoliday = holidayDates.has(dateStr);
       const isWorkDay = scheduleEntry?.isWorkDay && !isHoliday;
+
+      // Skip future BRT days
+      if (dateStr > todayStr) continue;
 
       let workedMinutes = 0;
       let status = 'NORMAL';
@@ -160,96 +192,99 @@ export class ReportsService {
         }
       } else if (dayPunches.length === 1) {
         status = isWorkDay ? 'INCOMPLETE' : status;
-      } else if (isWorkDay && date <= today) {
+      } else if (isWorkDay) {
         status = 'ABSENCE';
       }
 
-      // Only count days up to today
-      if (date <= today) {
-        let expectedMinutes = 0;
-        if (scheduleEntry?.isWorkDay && scheduleEntry.startTime && scheduleEntry.endTime) {
-          const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
-          const [eh, em] = scheduleEntry.endTime.split(':').map(Number);
-          expectedMinutes = (eh * 60 + em) - (sh * 60 + sm);
-          if (scheduleEntry.breakStartTime && scheduleEntry.breakEndTime) {
-            const [bsh, bsm] = scheduleEntry.breakStartTime.split(':').map(Number);
-            const [beh, bem] = scheduleEntry.breakEndTime.split(':').map(Number);
-            expectedMinutes -= (beh * 60 + bem) - (bsh * 60 + bsm);
-          }
+      // Calculate expected minutes for this day
+      let expectedMinutes = 0;
+      if (isWorkDay && scheduleEntry?.startTime && scheduleEntry?.endTime) {
+        const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
+        const [eh, em] = scheduleEntry.endTime.split(':').map(Number);
+        expectedMinutes = (eh * 60 + em) - (sh * 60 + sm);
+        if (scheduleEntry.breakStartTime && scheduleEntry.breakEndTime) {
+          const [bsh, bsm] = scheduleEntry.breakStartTime.split(':').map(Number);
+          const [beh, bem] = scheduleEntry.breakEndTime.split(':').map(Number);
+          expectedMinutes -= (beh * 60 + bem) - (bsh * 60 + bsm);
         }
-
-        let overtimeMinutes = 0;
-        let absenceMinutes = 0;
-        let lateMinutes = 0;
-
-        if (isWorkDay && expectedMinutes > 0) {
-          if (workedMinutes > expectedMinutes) {
-            overtimeMinutes = workedMinutes - expectedMinutes;
-          } else if (workedMinutes < expectedMinutes && workedMinutes > 0) {
-            absenceMinutes = expectedMinutes - workedMinutes;
-            // Check late arrival
-            if (dayPunches.length > 0 && scheduleEntry.startTime) {
-              const entry = dayPunches.find(p => p.type === 'ENTRY');
-              if (entry) {
-                const entryDate = new Date(entry.time);
-                const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
-                const schedStart = new Date(date);
-                schedStart.setHours(sh + 3, sm, 0, 0); // UTC offset
-                const diff = Math.floor((entryDate.getTime() - schedStart.getTime()) / 60000);
-                if (diff > 5) lateMinutes = diff; // 5 min tolerance
-              }
-            }
-          } else if (workedMinutes === 0 && dayPunches.length === 0) {
-            absenceMinutes = expectedMinutes;
-          }
-        } else if (!isWorkDay && workedMinutes > 0) {
-          overtimeMinutes = workedMinutes;
-        }
-
-        // Night hours (22:00 - 05:00)
-        let nightMinutes = 0;
-        if (dayPunches.length >= 2) {
-          const sorted = [...dayPunches].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-          for (let i = 0; i < sorted.length - 1; i += 2) {
-            const start = new Date(sorted[i].time);
-            const end = sorted[i + 1] ? new Date(sorted[i + 1].time) : start;
-            const startH = start.getHours() - 3; // UTC-3
-            const endH = end.getHours() - 3;
-            if (startH >= 22 || startH < 5 || endH >= 22 || endH < 5) {
-              // Simplified night calculation
-              const diffMin = Math.floor((end.getTime() - start.getTime()) / 60000);
-              if (startH >= 22 || startH < 5) nightMinutes += Math.min(diffMin, 60);
-            }
-          }
-        }
-
-        totalWorked += workedMinutes;
-        totalOvertime += overtimeMinutes;
-        totalLate += lateMinutes;
-        totalAbsence += absenceMinutes;
-        totalNight += nightMinutes;
-
-        days.push({
-          date: date.toISOString(),
-          dayOfWeek,
-          workedMinutes,
-          overtimeMinutes,
-          nightMinutes,
-          lateMinutes,
-          absenceMinutes,
-          breakMinutes: 0,
-          punchCount: dayPunches.length,
-          status,
-          notes: null,
-          punches: dayPunches,
-        });
       }
+
+      let overtimeMinutes = 0;
+      let absenceMinutes = 0;
+      let lateMinutes = 0;
+
+      if (isWorkDay && expectedMinutes > 0) {
+        if (workedMinutes > expectedMinutes) {
+          overtimeMinutes = workedMinutes - expectedMinutes;
+        } else if (workedMinutes < expectedMinutes && workedMinutes > 0) {
+          absenceMinutes = expectedMinutes - workedMinutes;
+          // Check late arrival
+          if (dayPunches.length > 0 && scheduleEntry.startTime) {
+            const entry = dayPunches.find(p => p.type === 'ENTRY');
+            if (entry) {
+              const entryDate = new Date(entry.time);
+              const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
+              // Schedule start in UTC: BRT time sh:sm = UTC (sh+3):sm on that calendar day
+              const schedStartUtc = new Date(Date.UTC(year, month - 1, day, sh + 3, sm, 0, 0));
+              const diff = Math.floor((entryDate.getTime() - schedStartUtc.getTime()) / 60000);
+              if (diff > 5) lateMinutes = diff; // 5 min tolerance
+            }
+          }
+        } else if (workedMinutes === 0 && dayPunches.length === 0) {
+          absenceMinutes = expectedMinutes;
+        }
+      } else if (!isWorkDay && workedMinutes > 0) {
+        overtimeMinutes = workedMinutes;
+      }
+
+      // Night hours (22:00 - 05:00 BRT) - simplified
+      let nightMinutes = 0;
+      if (dayPunches.length >= 2) {
+        const sorted = [...dayPunches].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        for (let i = 0; i < sorted.length - 1; i += 2) {
+          const start = new Date(sorted[i].time);
+          const end = sorted[i + 1] ? new Date(sorted[i + 1].time) : start;
+          // Convert to BRT hours
+          const startBrt = new Date(start.getTime() + BRT_OFFSET_MS);
+          const endBrt = new Date(end.getTime() + BRT_OFFSET_MS);
+          const startH = startBrt.getUTCHours();
+          const endH = endBrt.getUTCHours();
+          if (startH >= 22 || startH < 5 || endH >= 22 || endH < 5) {
+            const diffMin = Math.floor((end.getTime() - start.getTime()) / 60000);
+            if (startH >= 22 || startH < 5) nightMinutes += Math.min(diffMin, 60);
+          }
+        }
+      }
+
+      totalWorked += workedMinutes;
+      totalExpected += isWorkDay ? expectedMinutes : 0;
+      totalOvertime += overtimeMinutes;
+      totalLate += lateMinutes;
+      totalAbsence += absenceMinutes;
+      totalNight += nightMinutes;
+
+      days.push({
+        date: dateStr,
+        dayOfWeek,
+        workedMinutes,
+        expectedMinutes: isWorkDay ? expectedMinutes : 0,
+        overtimeMinutes,
+        nightMinutes,
+        lateMinutes,
+        absenceMinutes,
+        breakMinutes: 0,
+        punchCount: dayPunches.length,
+        status,
+        notes: null,
+        punches: dayPunches,
+      });
     }
 
     return {
       days,
       punchesByDate,
       totalWorkedMinutes: totalWorked,
+      totalExpectedMinutes: totalExpected,
       totalOvertimeMinutes: totalOvertime,
       totalNightMinutes: totalNight,
       totalLateMinutes: totalLate,
@@ -294,38 +329,15 @@ export class ReportsService {
       timesheetDays: calc.days,
     };
 
-    // Calculate expected hours for the month
-    let expectedMonthMinutes = 0;
-    if (employee?.schedule?.scheduleEntries) {
-      for (const day of calc.days) {
-        const entry = employee.schedule.scheduleEntries.find(
-          (e) => e.dayOfWeek === day.dayOfWeek && e.isWorkDay,
-        );
-        if (entry?.startTime && entry?.endTime) {
-          const [sh, sm] = entry.startTime.split(':').map(Number);
-          const [eh, em] = entry.endTime.split(':').map(Number);
-          let expected = (eh * 60 + em) - (sh * 60 + sm);
-          if (entry.breakStartTime && entry.breakEndTime) {
-            const [bsh, bsm] = entry.breakStartTime.split(':').map(Number);
-            const [beh, bem] = entry.breakEndTime.split(':').map(Number);
-            expected -= (beh * 60 + bem) - (bsh * 60 + bsm);
-          }
-          if (day.status !== 'HOLIDAY' && day.status !== 'WEEKEND') {
-            expectedMonthMinutes += expected;
-          }
-        }
-      }
-    }
-
     return {
       employee,
       timesheet,
       punchesByDate: calc.punchesByDate,
-      expectedMonthMinutes,
+      expectedMonthMinutes: calc.totalExpectedMinutes,
       daysWorked: calc.days.filter(d => d.workedMinutes > 0).length,
       daysAbsent: calc.days.filter(d => d.status === 'ABSENCE').length,
       daysIncomplete: calc.days.filter(d => d.status === 'INCOMPLETE').length,
-      _build: 'v53-dual-id',
+      _build: 'v69-brt-fix',
       _resolvedIds: OLD_ID_MAP[employeeId] ? [employeeId, OLD_ID_MAP[employeeId]] : [employeeId],
     };
   }
@@ -347,9 +359,8 @@ export class ReportsService {
       orderBy: { name: 'asc' },
     });
 
-    // Calculate from actual punches for each employee
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    // Use BRT boundaries for batch punch query
+    const { startDate, endDate } = getBrtMonthBoundsUtc(month, year);
 
     // Batch get all punches for the branch (include old employee IDs too)
     const allOldIds = Object.values(OLD_ID_MAP);
@@ -494,28 +505,26 @@ export class ReportsService {
       const calc = await this.calculateEmployeeMonth(emp.id, month, year);
       const stored = tsMap.get(emp.id);
 
-      // Calculate expected hours
-      let expectedMinutes = 0;
-      if (emp.schedule?.scheduleEntries) {
-        for (const day of calc.days) {
-          const entry = emp.schedule.scheduleEntries.find(
-            (e) => e.dayOfWeek === day.dayOfWeek && e.isWorkDay,
-          );
-          if (entry?.startTime && entry?.endTime) {
-            const [sh, sm] = entry.startTime.split(':').map(Number);
-            const [eh, em] = entry.endTime.split(':').map(Number);
-            let exp = (eh * 60 + em) - (sh * 60 + sm);
-            if (entry.breakStartTime && entry.breakEndTime) {
-              const [bsh, bsm] = entry.breakStartTime.split(':').map(Number);
-              const [beh, bem] = entry.breakEndTime.split(':').map(Number);
-              exp -= (beh * 60 + bem) - (bsh * 60 + bsm);
-            }
-            if (day.status !== 'HOLIDAY' && day.status !== 'WEEKEND') {
-              expectedMinutes += exp;
-            }
-          }
-        }
-      }
+      // Net overtime = gross overtime - total absence/late deficit (floored at 0)
+      // This transparently shows: employee earned X extra hours but was absent/late Y hours
+      const netOvertimeMinutes = Math.max(0, calc.totalOvertimeMinutes - calc.totalAbsenceMinutes);
+
+      // Build per-day breakdown for transparency
+      const dayDetails = calc.days.map(d => ({
+        date: d.date,
+        dayOfWeek: d.dayOfWeek,
+        status: d.status,
+        workedMinutes: d.workedMinutes,
+        expectedMinutes: d.expectedMinutes,
+        overtimeMinutes: d.overtimeMinutes,
+        lateMinutes: d.lateMinutes,
+        absenceMinutes: d.absenceMinutes,
+        punchCount: d.punchCount,
+        punches: d.punches.map(p => ({
+          time: p.time,
+          type: p.type,
+        })),
+      }));
 
       payrollData.push({
         employee: {
@@ -528,10 +537,13 @@ export class ReportsService {
         },
         workedMinutes: calc.totalWorkedMinutes,
         workedHours: (calc.totalWorkedMinutes / 60).toFixed(2),
-        expectedMinutes,
-        expectedHours: (expectedMinutes / 60).toFixed(2),
+        expectedMinutes: calc.totalExpectedMinutes,
+        expectedHours: (calc.totalExpectedMinutes / 60).toFixed(2),
         overtimeMinutes: calc.totalOvertimeMinutes,
         overtimeHours: (calc.totalOvertimeMinutes / 60).toFixed(2),
+        // NEW: Net overtime after deducting absences/late - transparent for RH
+        netOvertimeMinutes,
+        netOvertimeHours: (netOvertimeMinutes / 60).toFixed(2),
         nightMinutes: calc.totalNightMinutes,
         nightHours: (calc.totalNightMinutes / 60).toFixed(2),
         lateMinutes: calc.totalLateMinutes,
@@ -540,6 +552,10 @@ export class ReportsService {
         status: stored?.status || 'OPEN',
         hasPunches: calc.days.some(d => d.punchCount > 0),
         daysWorked: calc.days.filter(d => d.workedMinutes > 0).length,
+        daysAbsent: calc.days.filter(d => d.status === 'ABSENCE').length,
+        daysIncomplete: calc.days.filter(d => d.status === 'INCOMPLETE').length,
+        // Per-day transparency
+        dayDetails,
       });
     }
 
@@ -549,6 +565,7 @@ export class ReportsService {
       year,
       totalProcessed: employees.length,
       payrollData,
+      _build: 'v69-brt-net-overtime',
     };
   }
 

@@ -5,6 +5,12 @@ import { useEffect, useState, useCallback } from 'react';
 
 interface Branch { id: string; name: string; }
 
+interface SimpleEmployee {
+  id: string;
+  name: string;
+  position: string;
+}
+
 interface OvertimeEmployee {
   employee: {
     id: string;
@@ -19,6 +25,8 @@ interface OvertimeEmployee {
   expectedHours: string;
   overtimeMinutes: number;
   overtimeHours: string;
+  netOvertimeMinutes: number;
+  netOvertimeHours: string;
   nightMinutes: number;
   lateMinutes: number;
   absenceMinutes: number;
@@ -26,6 +34,8 @@ interface OvertimeEmployee {
   status: string;
   hasPunches: boolean;
   daysWorked: number;
+  daysAbsent: number;
+  daysIncomplete: number;
 }
 
 const fmtHHMM = (m: number): string => {
@@ -51,34 +61,84 @@ export default function OvertimePage() {
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [year, setYear] = useState(String(now.getFullYear()));
   const [data, setData] = useState<OvertimeEmployee[]>([]);
+  const [employees, setEmployees] = useState<SimpleEmployee[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
-  const [filterMode, setFilterMode] = useState<'all' | 'with_overtime' | 'no_punch'>('with_overtime');
+  const [filterMode, setFilterMode] = useState<'all' | 'with_overtime' | 'no_punch'>('all');
   const [minHours, setMinHours] = useState('0');
   const [searchEmployee, setSearchEmployee] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [toast, setToast] = useState('');
+  const [errorDetail, setErrorDetail] = useState('');
 
+  // Load branches
   useEffect(() => {
     apiClient.get('/branches', { params: { take: 50 } })
       .then(r => {
-        const list: Branch[] = r.data.data || [];
+        const list: Branch[] = r.data.data || r.data || [];
         setBranches(list);
-        if (list.length > 0) setSelectedBranch(list[0].id);
+        // Prefer "Atacado" branch as default
+        const atacado = list.find(b => b.name?.toLowerCase().includes('atacado'));
+        if (atacado) {
+          setSelectedBranch(atacado.id);
+        } else if (list.length > 0) {
+          setSelectedBranch(list[0].id);
+        }
       })
       .catch(() => {});
   }, []);
 
+  // Load employees when branch changes
+  useEffect(() => {
+    if (!selectedBranch) return;
+    setEmployees([]);
+    apiClient.get('/employees', { params: { take: 100, skip: 0 } })
+      .then(r => {
+        const allEmps = r.data.data || r.data || [];
+        // Filter by branch on client side (API may not support branchId filter)
+        const branchEmps = allEmps
+          .filter((e: any) => e.branchId === selectedBranch && e.isActive !== false)
+          .map((e: any) => ({
+            id: e.id,
+            name: e.name || '',
+            position: e.position || '',
+          }))
+          .sort((a: SimpleEmployee, b: SimpleEmployee) => a.name.localeCompare(b.name));
+        setEmployees(branchEmps);
+      })
+      .catch(() => {
+        // Fallback: try fetching more
+        apiClient.get('/employees', { params: { take: 200, skip: 0 } })
+          .then(r2 => {
+            const allEmps = r2.data.data || r2.data || [];
+            const branchEmps = allEmps
+              .filter((e: any) => e.branchId === selectedBranch && e.isActive !== false)
+              .map((e: any) => ({ id: e.id, name: e.name || '', position: e.position || '' }))
+              .sort((a: SimpleEmployee, b: SimpleEmployee) => a.name.localeCompare(b.name));
+            setEmployees(branchEmps);
+          })
+          .catch(() => setEmployees([]));
+      });
+  }, [selectedBranch]);
+
   const fetchReport = useCallback(async () => {
     if (!selectedBranch) return;
     setLoading(true);
+    setErrorDetail('');
     try {
       const r = await apiClient.get(`/reports/payroll/${selectedBranch}/${month}/${year}`);
-      setData(r.data.payrollData || []);
+      const payroll = r.data.payrollData || [];
+      setData(payroll);
       setFetched(true);
-    } catch {
+      if (payroll.length === 0) {
+        setToast('Nenhum funcionário encontrado nesta filial.');
+        setTimeout(() => setToast(''), 4000);
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.message || err?.message || 'Erro desconhecido';
+      setErrorDetail(`Erro: ${detail} (Status: ${err?.response?.status || '?'})`);
       setToast('Erro ao carregar relatório.');
-      setTimeout(() => setToast(''), 3000);
+      setTimeout(() => setToast(''), 4000);
     } finally {
       setLoading(false);
     }
@@ -100,7 +160,9 @@ export default function OvertimePage() {
   }).sort((a, b) => b.overtimeMinutes - a.overtimeMinutes);
 
   const totalOT = filtered.reduce((s, e) => s + e.overtimeMinutes, 0);
+  const totalNetOT = filtered.reduce((s, e) => s + (e.netOvertimeMinutes || 0), 0);
   const totalWorked = data.reduce((s, e) => s + e.workedMinutes, 0);
+  const totalAbsence = filtered.reduce((s, e) => s + e.absenceMinutes, 0);
   const withPunches = data.filter(e => e.hasPunches).length;
   const noPunch = data.filter(e => !e.hasPunches).length;
 
@@ -110,13 +172,16 @@ export default function OvertimePage() {
     const totalWorkedF = filtered.reduce((s, e) => s + e.workedMinutes, 0);
     const totalExpectedF = filtered.reduce((s, e) => s + e.expectedMinutes, 0);
     const totalOTF = filtered.reduce((s, e) => s + e.overtimeMinutes, 0);
+    const totalNetOTF = filtered.reduce((s, e) => s + (e.netOvertimeMinutes || 0), 0);
     const totalLateF = filtered.reduce((s, e) => s + e.lateMinutes, 0);
+    const totalAbsenceF = filtered.reduce((s, e) => s + e.absenceMinutes, 0);
     const totalDaysF = filtered.reduce((s, e) => s + e.daysWorked, 0);
 
     const rowsHtml = filtered.map((item, i) => {
-      const otClass = item.overtimeMinutes > 480 ? 'color:#dc2626;font-weight:700' :
-        item.overtimeMinutes > 240 ? 'color:#d97706;font-weight:700' :
-        item.overtimeMinutes > 0 ? 'color:#16a34a;font-weight:700' : 'color:#94a3b8';
+      const netOT = item.netOvertimeMinutes || 0;
+      const otClass = netOT > 480 ? 'color:#dc2626;font-weight:700' :
+        netOT > 240 ? 'color:#d97706;font-weight:700' :
+        netOT > 0 ? 'color:#16a34a;font-weight:700' : 'color:#94a3b8';
       const noPunchStyle = !item.hasPunches ? 'opacity:0.6' : '';
       return `
         <tr style="${noPunchStyle}">
@@ -127,15 +192,16 @@ export default function OvertimePage() {
           </td>
           <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">
             <div style="color:#475569;font-size:11px">${item.employee.position || '—'}</div>
-            <div style="color:#94a3b8;font-size:10px">${item.employee.department || '—'}</div>
           </td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px">
             ${item.hasPunches ? fmtHHMM(item.workedMinutes) : 'Sem ponto'}
           </td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.expectedMinutes)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass};outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.overtimeMinutes)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'};outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${fmtHHMM(item.lateMinutes)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#475569;outline:none;cursor:text" onfocus="this.style.background='#eff6ff';this.style.borderRadius='4px'" onblur="this.style.background='transparent'">${item.daysWorked}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b">${fmtHHMM(item.expectedMinutes)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#94a3b8">${fmtHHMM(item.overtimeMinutes)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.absenceMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.absenceMinutes)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass}">${fmtHHMM(netOT)}</td>
+          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.lateMinutes)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#475569">${item.daysWorked}</td>
         </tr>`;
     }).join('');
 
@@ -153,19 +219,18 @@ export default function OvertimePage() {
         .header-right { text-align: right; }
         .header-right .branch { font-size: 14px; font-weight: 600; color: #4f46e5; }
         .header-right .period { font-size: 12px; color: #64748b; margin-top: 2px; }
-        .summary { display: flex; gap: 12px; margin-bottom: 16px; }
-        .card { flex: 1; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .summary { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+        .card { flex: 1; min-width: 140px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
         .card .label { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
         .card .value { font-size: 18px; font-weight: 700; }
+        .deduction-note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 11px; color: #92400e; }
+        .deduction-note strong { color: #78350f; }
         table { width: 100%; border-collapse: collapse; }
         thead tr { background: #f8fafc; }
         th { padding: 8px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; border-bottom: 2px solid #e2e8f0; }
         th.right { text-align: right; }
         tfoot tr { background: #f1f5f9; }
         tfoot td { padding: 8px; font-weight: 700; font-size: 12px; border-top: 2px solid #cbd5e1; }
-        .legend { margin-top: 12px; display: flex; gap: 16px; font-size: 10px; color: #64748b; }
-        .legend span { display: flex; align-items: center; gap: 4px; }
-        .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
         .footer { margin-top: 20px; font-size: 9px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
       </style>
     </head><body>
@@ -186,19 +251,24 @@ export default function OvertimePage() {
           <div class="value" style="color:#1e293b">${data.length}</div>
           <div style="font-size:10px;color:#94a3b8;margin-top:2px">${withPunches} com ponto · ${noPunch} sem ponto</div>
         </div>
+        <div class="card" style="border-color:#86efac">
+          <div class="label" style="color:#16a34a">H. Extras Brutas</div>
+          <div class="value" style="color:#16a34a;font-family:monospace">${fmtHHMM(totalOTF)}</div>
+        </div>
+        <div class="card" style="border-color:#fecaca">
+          <div class="label" style="color:#dc2626">Faltas/Atrasos</div>
+          <div class="value" style="color:#dc2626;font-family:monospace">-${fmtHHMM(totalAbsenceF)}</div>
+        </div>
         <div class="card" style="border-color:#fde68a">
-          <div class="label" style="color:#d97706">Total Horas Extras</div>
-          <div class="value" style="color:#d97706;font-family:monospace">${fmtHHMM(totalOT)}</div>
-          <div style="font-size:10px;color:#94a3b8;margin-top:2px">${filtered.filter(e => e.overtimeMinutes > 0).length} funcionários</div>
+          <div class="label" style="color:#d97706">H. Extras Líquidas</div>
+          <div class="value" style="color:#d97706;font-family:monospace">${fmtHHMM(totalNetOTF)}</div>
         </div>
-        <div class="card">
-          <div class="label">Total Trabalhadas</div>
-          <div class="value" style="color:#1e293b;font-family:monospace">${fmtHHMM(totalWorked)}</div>
-        </div>
-        <div class="card" style="border-color:${noPunch > 0 ? '#fecaca' : '#e2e8f0'}">
-          <div class="label" style="color:${noPunch > 0 ? '#ef4444' : '#94a3b8'}">Sem Registro</div>
-          <div class="value" style="color:${noPunch > 0 ? '#dc2626' : '#1e293b'}">${noPunch}</div>
-        </div>
+      </div>
+
+      <div class="deduction-note">
+        <strong>Cálculo transparente:</strong> H. Extras Líquidas = H. Extras Brutas − Faltas/Atrasos.
+        Cada hora que o funcionário faltou ou chegou atrasado é descontada das horas extras acumuladas.
+        O valor líquido é o que efetivamente deve ser pago. Confira com as batidas individuais de cada funcionário.
       </div>
 
       <table>
@@ -206,10 +276,12 @@ export default function OvertimePage() {
           <tr>
             <th>#</th>
             <th>Colaborador</th>
-            <th>Cargo / Setor</th>
+            <th>Cargo</th>
             <th class="right">Trabalhadas</th>
             <th class="right">Previstas</th>
-            <th class="right" style="color:#d97706">H. Extras</th>
+            <th class="right">H.E. Brutas</th>
+            <th class="right" style="color:#dc2626">Faltas</th>
+            <th class="right" style="color:#d97706">H.E. Líquidas</th>
             <th class="right">Atrasos</th>
             <th class="right">Dias</th>
           </tr>
@@ -220,18 +292,14 @@ export default function OvertimePage() {
             <td colspan="3" style="padding:8px;color:#475569;font-size:11px">TOTAL — ${filtered.length} colaboradores</td>
             <td style="padding:8px;text-align:right;font-family:monospace;color:#1e293b">${fmtHHMM(totalWorkedF)}</td>
             <td style="padding:8px;text-align:right;font-family:monospace;color:#64748b">${fmtHHMM(totalExpectedF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#d97706">${fmtHHMM(totalOTF)}</td>
+            <td style="padding:8px;text-align:right;font-family:monospace;color:#16a34a">${fmtHHMM(totalOTF)}</td>
+            <td style="padding:8px;text-align:right;font-family:monospace;color:#dc2626">-${fmtHHMM(totalAbsenceF)}</td>
+            <td style="padding:8px;text-align:right;font-family:monospace;color:#d97706;font-weight:800">${fmtHHMM(totalNetOTF)}</td>
             <td style="padding:8px;text-align:right;font-family:monospace;color:#ef4444">${fmtHHMM(totalLateF)}</td>
             <td style="padding:8px;text-align:right;color:#475569">${totalDaysF}</td>
           </tr>
         </tfoot>` : ''}
       </table>
-
-      <div class="legend">
-        <span><span class="dot" style="background:#dcfce7;border:1px solid #86efac"></span>Normal (até 4h)</span>
-        <span><span class="dot" style="background:#fef3c7;border:1px solid #fcd34d"></span>Atenção (4h–8h)</span>
-        <span><span class="dot" style="background:#fee2e2;border:1px solid #fca5a5"></span>Excessivo (acima de 8h)</span>
-      </div>
 
       <div class="footer">Ponto Online — Relatório gerado automaticamente • ${bName} • ${mLabel}/${year}</div>
 
@@ -245,7 +313,7 @@ export default function OvertimePage() {
       <div id="toolbar" style="position:fixed;top:0;left:0;right:0;background:#4f46e5;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
         <div style="display:flex;align-items:center;gap:12px">
           <span style="color:white;font-size:13px;font-weight:600">Pre-visualizacao do Relatorio</span>
-          <span style="color:rgba(255,255,255,0.7);font-size:11px">Clique em qualquer valor da tabela para editar antes de imprimir</span>
+          <span style="color:rgba(255,255,255,0.7);font-size:11px">Clique em qualquer valor para editar antes de imprimir</span>
         </div>
         <div style="display:flex;gap:8px">
           <button onclick="imprimirRelatorio()" style="background:white;color:#4f46e5;border:none;padding:8px 20px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Imprimir / Salvar PDF</button>
@@ -282,7 +350,7 @@ export default function OvertimePage() {
       <div className="flex items-start justify-between print:hidden">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Horas Extras</h1>
-          <p className="text-slate-500 mt-1">Relatório de horas extras por colaborador — geração rápida para o RH</p>
+          <p className="text-slate-500 mt-1">Relatório transparente — horas extras com dedução de faltas e atrasos</p>
         </div>
         {fetched && (
           <div className="flex gap-2">
@@ -313,7 +381,7 @@ export default function OvertimePage() {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Filial</label>
             <select
               value={selectedBranch}
-              onChange={e => setSelectedBranch(e.target.value)}
+              onChange={e => { setSelectedBranch(e.target.value); setFetched(false); setData([]); setSelectedEmployee(''); }}
               className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               {branches.map(b => (
@@ -359,26 +427,26 @@ export default function OvertimePage() {
           </div>
         </div>
 
-        {/* Employee filter */}
+        {/* Employee filter - now populated independently */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Funcionario Individual</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Funcionário Individual</label>
             <select
               value={selectedEmployee}
               onChange={e => setSelectedEmployee(e.target.value)}
               className={`w-full h-9 px-3 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${selectedEmployee ? 'border-violet-400 text-violet-900 font-medium' : 'border-slate-200'}`}
             >
-              <option value="">Todos os funcionarios</option>
-              {data.sort((a, b) => a.employee.name.localeCompare(b.employee.name)).map(e => (
-                <option key={e.employee.id} value={e.employee.id}>
-                  {e.employee.name} — {e.employee.position || 'Sem cargo'} ({fmtHHMM(e.overtimeMinutes)} extras)
+              <option value="">Todos os funcionários ({employees.length})</option>
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.name} — {e.position || 'Sem cargo'}
                 </option>
               ))}
             </select>
             {selectedEmployee && (
               <p className="text-xs text-violet-600 mt-1 flex items-center gap-1">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Relatorio individual selecionado
+                Relatório individual selecionado
               </p>
             )}
           </div>
@@ -411,8 +479,8 @@ export default function OvertimePage() {
 
         <div className="flex items-center gap-3 flex-wrap mb-4">
           {[
-            { value: 'with_overtime', label: 'Com Horas Extras' },
             { value: 'all', label: 'Todos' },
+            { value: 'with_overtime', label: 'Com Horas Extras' },
             { value: 'no_punch', label: 'Sem Ponto' },
           ].map(opt => (
             <button
@@ -451,6 +519,10 @@ export default function OvertimePage() {
             </>
           )}
         </button>
+
+        {errorDetail && (
+          <p className="text-xs text-red-500 mt-2">{errorDetail}</p>
+        )}
       </div>
 
       {/* Toast */}
@@ -463,34 +535,47 @@ export default function OvertimePage() {
       {/* Summary cards */}
       {fetched && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 mb-1">Total Funcionários</p>
+              <p className="text-xs text-slate-500 mb-1">Funcionários</p>
               <p className="text-2xl font-bold text-slate-900">{data.length}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{withPunches} com ponto · {noPunch} sem ponto</p>
+              <p className="text-xs text-slate-400 mt-0.5">{withPunches} com ponto · {noPunch} sem</p>
             </div>
-            <div className="bg-white rounded-xl border border-amber-200 p-4">
-              <p className="text-xs text-amber-600 mb-1">Total Horas Extras</p>
-              <p className="text-2xl font-bold text-amber-700">{fmtHHMM(totalOT)}</p>
-              <p className="text-xs text-amber-500 mt-0.5">{filtered.filter(e => e.overtimeMinutes > 0).length} funcionários</p>
+            <div className="bg-white rounded-xl border border-emerald-200 p-4">
+              <p className="text-xs text-emerald-600 mb-1">H. Extras Brutas</p>
+              <p className="text-2xl font-bold text-emerald-700 font-mono">{fmtHHMM(totalOT)}</p>
+              <p className="text-xs text-emerald-500 mt-0.5">antes das deduções</p>
+            </div>
+            <div className="bg-white rounded-xl border border-red-200 p-4">
+              <p className="text-xs text-red-500 mb-1">Faltas/Déficit</p>
+              <p className="text-2xl font-bold text-red-600 font-mono">-{fmtHHMM(totalAbsence)}</p>
+              <p className="text-xs text-red-400 mt-0.5">a descontar</p>
+            </div>
+            <div className="bg-white rounded-xl border-2 border-amber-300 p-4">
+              <p className="text-xs text-amber-600 mb-1 font-semibold">H. Extras Líquidas</p>
+              <p className="text-2xl font-bold text-amber-700 font-mono">{fmtHHMM(totalNetOT)}</p>
+              <p className="text-xs text-amber-500 mt-0.5">a pagar</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <p className="text-xs text-slate-500 mb-1">Total Trabalhadas</p>
-              <p className="text-2xl font-bold text-slate-900">{fmtHHMM(totalWorked)}</p>
+              <p className="text-2xl font-bold text-slate-900 font-mono">{fmtHHMM(totalWorked)}</p>
               <p className="text-xs text-slate-400 mt-0.5">{monthLabel}/{year}</p>
-            </div>
-            <div className={`bg-white rounded-xl border p-4 ${noPunch > 0 ? 'border-red-200' : 'border-slate-200'}`}>
-              <p className={`text-xs mb-1 ${noPunch > 0 ? 'text-red-500' : 'text-slate-500'}`}>Sem Registro</p>
-              <p className={`text-2xl font-bold ${noPunch > 0 ? 'text-red-600' : 'text-slate-900'}`}>{noPunch}</p>
-              <p className="text-xs text-slate-400 mt-0.5">funcionários sem ponto</p>
             </div>
           </div>
 
-          {/* Legend */}
-          <div className="flex items-center gap-4 text-xs text-slate-500 print:hidden">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 border border-emerald-300 inline-block"></span> Normal (até 4h)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 border border-amber-300 inline-block"></span> Atenção (4h–8h)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 border border-red-300 inline-block"></span> Excessivo (acima de 8h)</span>
+          {/* Deduction explanation */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+            <p className="font-semibold mb-1">Cálculo Transparente de Horas Extras</p>
+            <p className="text-amber-700">
+              <span className="font-mono font-bold text-emerald-700">{fmtHHMM(totalOT)}</span> (brutas)
+              {' − '}
+              <span className="font-mono font-bold text-red-600">{fmtHHMM(totalAbsence)}</span> (faltas/atrasos)
+              {' = '}
+              <span className="font-mono font-bold text-amber-700">{fmtHHMM(totalNetOT)}</span> (líquidas a pagar)
+            </p>
+            <p className="text-xs text-amber-600 mt-1">
+              Cada hora de falta ou atraso é descontada das horas extras. Confira com as batidas individuais de cada funcionário.
+            </p>
           </div>
 
           {/* Table */}
@@ -507,25 +592,27 @@ export default function OvertimePage() {
                   <tr className="border-b border-slate-100">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">#</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Colaborador</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cargo / Setor</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cargo</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Trabalhadas</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Previstas</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-amber-600 uppercase tracking-wide">H. Extras</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-emerald-600 uppercase tracking-wide">H.E. Brutas</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-red-500 uppercase tracking-wide">Faltas</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-amber-600 uppercase tracking-wide">H.E. Líquidas</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Atrasos</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Dias</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Nível</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-12 text-slate-400">
+                      <td colSpan={10} className="text-center py-12 text-slate-400">
                         {loading ? 'Carregando...' : 'Nenhum colaborador encontrado com os filtros selecionados.'}
                       </td>
                     </tr>
                   ) : (
                     filtered.map((item, i) => {
-                      const badge = getOTBadge(item.overtimeMinutes);
+                      const netOT = item.netOvertimeMinutes || 0;
+                      const badge = getOTBadge(netOT);
                       return (
                         <tr
                           key={item.employee.id}
@@ -537,7 +624,7 @@ export default function OvertimePage() {
                             <div className="text-xs text-slate-400">{item.employee.cpf}</div>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="text-slate-700 truncate max-w-[180px]">{item.employee.position || '—'}</div>
+                            <div className="text-slate-700 truncate max-w-[160px]">{item.employee.position || '—'}</div>
                             <div className="text-xs text-slate-400">{item.employee.department || '—'}</div>
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
@@ -549,9 +636,26 @@ export default function OvertimePage() {
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-slate-500">{fmtHHMM(item.expectedMinutes)}</td>
                           <td className="px-4 py-3 text-right">
-                            <span className={`font-mono font-semibold ${getOTColor(item.overtimeMinutes)}`}>
+                            <span className={`font-mono ${item.overtimeMinutes > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                               {fmtHHMM(item.overtimeMinutes)}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {item.absenceMinutes > 0 ? (
+                              <span className="text-red-500">-{fmtHHMM(item.absenceMinutes)}</span>
+                            ) : (
+                              <span className="text-slate-400">00:00</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`font-mono font-semibold ${getOTColor(netOT)}`}>
+                              {fmtHHMM(netOT)}
+                            </span>
+                            {badge && (
+                              <span className={`ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded border ${badge.cls}`}>
+                                {badge.label}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-slate-500">
                             {item.lateMinutes > 0 ? (
@@ -559,15 +663,6 @@ export default function OvertimePage() {
                             ) : '00:00'}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-600">{item.daysWorked}</td>
-                          <td className="px-4 py-3 text-center">
-                            {badge ? (
-                              <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md border ${badge.cls}`}>
-                                {badge.label}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300 text-xs">—</span>
-                            )}
-                          </td>
                         </tr>
                       );
                     })
@@ -583,8 +678,14 @@ export default function OvertimePage() {
                       <td className="px-4 py-3 text-right font-mono text-slate-500">
                         {fmtHHMM(filtered.reduce((s, e) => s + e.expectedMinutes, 0))}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-amber-700">
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
                         {fmtHHMM(totalOT)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-red-500">
+                        -{fmtHHMM(totalAbsence)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-amber-700">
+                        {fmtHHMM(totalNetOT)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-red-500">
                         {fmtHHMM(filtered.reduce((s, e) => s + e.lateMinutes, 0))}
@@ -592,7 +693,6 @@ export default function OvertimePage() {
                       <td className="px-4 py-3 text-right font-semibold text-slate-700">
                         {filtered.reduce((s, e) => s + e.daysWorked, 0)}
                       </td>
-                      <td></td>
                     </tr>
                   </tfoot>
                 )}
@@ -610,7 +710,7 @@ export default function OvertimePage() {
             </svg>
           </div>
           <p className="text-slate-500 font-medium">Selecione a filial, mês e ano</p>
-          <p className="text-slate-400 text-sm mt-1">Depois clique em "Gerar Relatório" para ver as horas extras</p>
+          <p className="text-slate-400 text-sm mt-1">Depois clique em &quot;Gerar Relatório&quot; para ver as horas extras</p>
         </div>
       )}
     </div>
