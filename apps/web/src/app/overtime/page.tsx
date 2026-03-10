@@ -761,6 +761,9 @@ export default function OvertimePage() {
   const [toast, setToast] = useState('');
   const [errorDetail, setErrorDetail] = useState('');
   const [modalEmp, setModalEmp] = useState<OvertimeEmployee | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   // Load branches
   useEffect(() => {
@@ -948,6 +951,214 @@ export default function OvertimePage() {
     if (win) { win.document.write(html); win.document.close(); }
   };
 
+  // ─── Batch PDF for selected employees ───
+  const generateBatchPDF = (employees: OvertimeEmployee[]) => {
+    if (employees.length === 0) return;
+    const mLabel = MONTHS.find(m2 => m2.value === month)?.label || month;
+    const bName = branches.find(b => b.id === selectedBranch)?.name || '';
+
+    const employeeSections = employees.map((emp, empIdx) => {
+      const allDays = emp.dayDetails || [];
+      const tWorked = allDays.reduce((s, d) => s + d.workedMinutes, 0);
+      const tExpected = allDays.reduce((s, d) => s + d.expectedMinutes, 0);
+      const tOT = allDays.reduce((s, d) => s + d.overtimeMinutes, 0);
+      const tAbs = allDays.reduce((s, d) => s + d.absenceMinutes, 0);
+      const tLate = allDays.reduce((s, d) => s + d.lateMinutes, 0);
+      const tNet = Math.max(0, tOT - tAbs);
+      const daysWorked = allDays.filter(d => d.workedMinutes > 0).length;
+      const daysAbsent = allDays.filter(d => d.status === 'ABSENCE').length;
+
+      const rowsHtml = allDays.map(d => {
+        const dateF = d.date.split('-').reverse().join('/');
+        const dow = DOW_NAMES[d.dayOfWeek];
+        const isWeekend = d.status === 'WEEKEND' || d.status === 'HOLIDAY';
+        const isAbsence = d.status === 'ABSENCE';
+        const rowStyle = isWeekend ? 'background:#f8fafc;color:#94a3b8;' : isAbsence ? 'background:#fef2f2;' : '';
+        const punchesStr = d.punches.length === 0 ? '—' :
+          d.punches.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+            .map(p => `${fmtBrtTime(p.time)} ${punchLabel(p.type)}`).join(' · ');
+        const statusMap: Record<string, string> = { NORMAL:'Normal', WEEKEND:'Fim de Semana', HOLIDAY:'Feriado', ABSENCE:'Falta', INCOMPLETE:'Incompleto' };
+        return `<tr style="${rowStyle}">
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;font-family:monospace">${dateF}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px">${dow}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:9px">${statusMap[d.status] || d.status}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:9px;color:#475569">${punchesStr}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:right;font-family:monospace">${fmtHHMM(d.workedMinutes)}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:right;font-family:monospace;color:#94a3b8">${fmtHHMM(d.expectedMinutes)}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:right;font-family:monospace;color:${d.overtimeMinutes > 0 ? '#16a34a' : '#cbd5e1'}">${d.overtimeMinutes > 0 ? fmtHHMM(d.overtimeMinutes) : '—'}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:right;font-family:monospace;color:${d.absenceMinutes > 0 ? '#dc2626' : '#cbd5e1'}">${d.absenceMinutes > 0 ? fmtHHMM(d.absenceMinutes) : '—'}</td>
+          <td style="padding:3px 5px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:right;font-family:monospace;color:${d.lateMinutes > 0 ? '#d97706' : '#cbd5e1'}">${d.lateMinutes > 0 ? fmtHHMM(d.lateMinutes) : '—'}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <div style="${empIdx > 0 ? 'page-break-before:always;' : ''}padding-top:${empIdx > 0 ? '10px' : '0'}">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:3px solid #4f46e5;margin-bottom:10px">
+            <div>
+              <h1 style="font-size:14px;font-weight:800;color:#1e293b;margin-bottom:2px">Relatório Individual de Ponto</h1>
+              <p style="font-size:10px;color:#64748b">Conferência de batidas, horas extras e faltas — ${empIdx + 1} de ${employees.length}</p>
+            </div>
+            <div style="text-align:right">
+              <p style="font-size:12px;font-weight:700;color:#4f46e5">${mLabel} / ${year}</p>
+              <p style="font-size:8px;color:#94a3b8">${bName}</p>
+            </div>
+          </div>
+          <!-- Employee info -->
+          <div style="display:flex;gap:16px;margin-bottom:10px;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+            <div style="flex:1">
+              <p style="font-size:8px;color:#94a3b8;text-transform:uppercase">Colaborador</p>
+              <p style="font-size:13px;font-weight:700;color:#0f172a">${emp.employee.name}</p>
+            </div>
+            <div>
+              <p style="font-size:8px;color:#94a3b8;text-transform:uppercase">Cargo</p>
+              <p style="font-size:11px;font-weight:600;color:#334155">${emp.employee.position || '—'}</p>
+            </div>
+            <div>
+              <p style="font-size:8px;color:#94a3b8;text-transform:uppercase">CPF</p>
+              <p style="font-size:11px;font-weight:600;color:#334155;font-family:monospace">${emp.employee.cpf}</p>
+            </div>
+          </div>
+          <!-- Summary -->
+          <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:80px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:center">
+              <p style="font-size:7px;color:#94a3b8;text-transform:uppercase">Trabalhadas</p>
+              <p style="font-size:15px;font-weight:800;color:#0f172a;font-family:monospace">${fmtHHMM(tWorked)}</p>
+            </div>
+            <div style="flex:1;min-width:80px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:center">
+              <p style="font-size:7px;color:#94a3b8;text-transform:uppercase">Previstas</p>
+              <p style="font-size:15px;font-weight:800;color:#64748b;font-family:monospace">${fmtHHMM(tExpected)}</p>
+            </div>
+            <div style="flex:1;min-width:80px;padding:6px 8px;border:1px solid #86efac;border-radius:6px;text-align:center">
+              <p style="font-size:7px;color:#16a34a;text-transform:uppercase;font-weight:600">H.E. Brutas</p>
+              <p style="font-size:15px;font-weight:800;color:#16a34a;font-family:monospace">${fmtHHMM(tOT)}</p>
+            </div>
+            <div style="flex:1;min-width:80px;padding:6px 8px;border:1px solid #fecaca;border-radius:6px;text-align:center">
+              <p style="font-size:7px;color:#dc2626;text-transform:uppercase;font-weight:600">Faltas</p>
+              <p style="font-size:15px;font-weight:800;color:#dc2626;font-family:monospace">${fmtHHMM(tAbs)}</p>
+            </div>
+            <div style="flex:1;min-width:80px;padding:6px 8px;border:2px solid #fbbf24;border-radius:6px;text-align:center">
+              <p style="font-size:7px;color:#d97706;text-transform:uppercase;font-weight:700">H.E. Líquidas</p>
+              <p style="font-size:15px;font-weight:800;color:#d97706;font-family:monospace">${fmtHHMM(tNet)}</p>
+            </div>
+          </div>
+          <!-- Calc -->
+          <div style="padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:10px;font-size:10px;color:#92400e">
+            <strong>Cálculo:</strong>
+            <span style="font-family:monospace;font-weight:700;color:#16a34a">${fmtHHMM(tOT)}</span> (brutas)
+            − <span style="font-family:monospace;font-weight:700;color:#dc2626">${fmtHHMM(tAbs)}</span> (faltas)
+            = <span style="font-family:monospace;font-weight:700;color:#d97706">${fmtHHMM(tNet)}</span> (líquidas)
+            · Dias: <strong>${daysWorked}</strong> · Faltas: <strong>${daysAbsent}</strong> · Atrasos: <strong>${fmtHHMM(tLate)}</strong>
+          </div>
+          <!-- Table -->
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f1f5f9">
+              <th style="padding:4px;text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Data</th>
+              <th style="padding:4px;text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Dia</th>
+              <th style="padding:4px;text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Status</th>
+              <th style="padding:4px;text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Batidas</th>
+              <th style="padding:4px;text-align:right;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Trab.</th>
+              <th style="padding:4px;text-align:right;font-size:8px;font-weight:700;text-transform:uppercase;color:#475569;border-bottom:2px solid #cbd5e1">Prev.</th>
+              <th style="padding:4px;text-align:right;font-size:8px;font-weight:700;text-transform:uppercase;color:#16a34a;border-bottom:2px solid #cbd5e1">H.E.</th>
+              <th style="padding:4px;text-align:right;font-size:8px;font-weight:700;text-transform:uppercase;color:#dc2626;border-bottom:2px solid #cbd5e1">Falta</th>
+              <th style="padding:4px;text-align:right;font-size:8px;font-weight:700;text-transform:uppercase;color:#d97706;border-bottom:2px solid #cbd5e1">Atraso</th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+            <tfoot><tr style="background:#f1f5f9">
+              <td colspan="4" style="padding:4px;font-size:9px;color:#475569;text-transform:uppercase;font-weight:700;border-top:2px solid #94a3b8">Total</td>
+              <td style="padding:4px;text-align:right;font-family:monospace;font-weight:700;font-size:10px;border-top:2px solid #94a3b8">${fmtHHMM(tWorked)}</td>
+              <td style="padding:4px;text-align:right;font-family:monospace;color:#64748b;font-size:10px;border-top:2px solid #94a3b8">${fmtHHMM(tExpected)}</td>
+              <td style="padding:4px;text-align:right;font-family:monospace;color:#16a34a;font-weight:700;font-size:10px;border-top:2px solid #94a3b8">${fmtHHMM(tOT)}</td>
+              <td style="padding:4px;text-align:right;font-family:monospace;color:#dc2626;font-weight:700;font-size:10px;border-top:2px solid #94a3b8">${fmtHHMM(tAbs)}</td>
+              <td style="padding:4px;text-align:right;font-family:monospace;color:#d97706;font-weight:700;font-size:10px;border-top:2px solid #94a3b8">${fmtHHMM(tLate)}</td>
+            </tr></tfoot>
+          </table>
+          <!-- Signature -->
+          <div style="margin-top:30px;display:flex;gap:30px;justify-content:center">
+            <div style="text-align:center;width:200px">
+              <div style="border-top:1px solid #334155;padding-top:4px">
+                <p style="font-size:9px;font-weight:600;color:#334155">${emp.employee.name}</p>
+                <p style="font-size:8px;color:#94a3b8">Colaborador</p>
+              </div>
+            </div>
+            <div style="text-align:center;width:200px">
+              <div style="border-top:1px solid #334155;padding-top:4px">
+                <p style="font-size:9px;font-weight:600;color:#334155">Responsável RH</p>
+                <p style="font-size:8px;color:#94a3b8">Departamento Pessoal</p>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><head>
+      <meta charset="UTF-8">
+      <title>Conferência em Lote — ${employees.length} funcionários — ${mLabel}/${year}</title>
+      <style>
+        @media print { #toolbar { display: none !important; } body { margin: 0; } }
+        @page { margin: 10mm; size: A4 portrait; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1e293b; font-size: 11px; }
+      </style>
+    </head><body>
+      ${employeeSections}
+      <div style="margin-top:10px;font-size:7px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:4px">
+        Ponto Online v70 — Relatório em lote · ${employees.length} funcionários · ${mLabel}/${year} · Gerado em ${new Date().toLocaleString('pt-BR')}
+      </div>
+      <script>function imprimirDoc(){document.getElementById('toolbar').style.display='none';window.print();document.getElementById('toolbar').style.display='flex';}</script>
+      <div id="toolbar" style="position:fixed;top:0;left:0;right:0;background:#4f46e5;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:white;font-size:13px;font-weight:600">Relatório em Lote — ${employees.length} funcionários</span>
+          <span style="color:rgba(255,255,255,0.7);font-size:11px">${mLabel}/${year} · ${bName}</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="imprimirDoc()" style="background:white;color:#4f46e5;border:none;padding:8px 20px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Imprimir / Salvar PDF</button>
+          <button onclick="window.close()" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer">Fechar</button>
+        </div>
+      </div>
+      <div style="height:50px"></div>
+    </body></html>`;
+
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(e => e.employee.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  // ─── On-demand sync ───
+  const syncPunches = async () => {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const r = await apiClient.post('/auto-sync/sync-all');
+      const result = r.data;
+      const total = result?.totalNewPunches ?? result?.results?.reduce((s: number, d: any) => s + (d.newPunches || 0), 0) ?? 0;
+      setSyncMsg(`Sincronização concluída! ${total} nova(s) batida(s) importada(s).`);
+      // Auto-refresh report after sync
+      if (fetched) {
+        setTimeout(() => fetchReport(), 1000);
+      }
+    } catch (err: any) {
+      setSyncMsg(`Erro na sincronização: ${err?.response?.data?.message || err?.message || 'Falha'}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(''), 8000);
+    }
+  };
+
   const getOTColor = (min: number) => {
     if (min === 0) return 'text-slate-400';
     if (min <= 240) return 'text-emerald-600';
@@ -984,19 +1195,66 @@ export default function OvertimePage() {
           <h1 className="text-2xl font-bold text-slate-900">Horas Extras</h1>
           <p className="text-slate-500 mt-1">Relatório transparente — horas extras com dedução de faltas e atrasos</p>
         </div>
-        {fetched && (
-          <div className="flex gap-2">
-            <button
-              onClick={generatePDF}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-              Exportar PDF
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          {/* Sync button - always visible */}
+          <button
+            onClick={syncPunches}
+            disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+            title="Sincronizar batidas do relógio de ponto agora"
+          >
+            {syncing ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Sincronizar Ponto
+              </>
+            )}
+          </button>
+          {fetched && (
+            <>
+              <button
+                onClick={generatePDF}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                Exportar PDF
+              </button>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={() => generateBatchPDF(filtered.filter(e => selectedIds.has(e.employee.id)))}
+                  className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  Imprimir {selectedIds.size} Selecionado{selectedIds.size > 1 ? 's' : ''}
+                </button>
+              )}
+              <button
+                onClick={() => generateBatchPDF(filtered)}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors"
+                title="Imprimir relatório individual de TODOS os funcionários"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Imprimir Todos ({filtered.length})
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -1137,6 +1395,18 @@ export default function OvertimePage() {
         {errorDetail && <p className="text-xs text-red-500 mt-2">{errorDetail}</p>}
       </div>
 
+      {/* Sync message */}
+      {syncMsg && (
+        <div className={`rounded-xl border p-3 text-sm font-medium ${syncMsg.includes('Erro') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-teal-50 border-teal-200 text-teal-700'}`}>
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={syncMsg.includes('Erro') ? 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'} />
+            </svg>
+            {syncMsg}
+          </div>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <div className="fixed top-4 right-4 z-50 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg text-sm">
@@ -1197,12 +1467,28 @@ export default function OvertimePage() {
               <h2 className="text-sm font-semibold text-slate-900">
                 {branchName} — {monthLabel}/{year}
               </h2>
-              <span className="text-xs text-slate-400">{filtered.length} colaboradores</span>
+              <div className="flex items-center gap-3">
+                {selectedIds.size > 0 && (
+                  <span className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">
+                    {selectedIds.size} selecionado{selectedIds.size > 1 ? 's' : ''}
+                  </span>
+                )}
+                <span className="text-xs text-slate-400">{filtered.length} colaboradores</span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100">
+                    <th className="px-3 py-3 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        title="Selecionar todos"
+                      />
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">#</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Colaborador</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cargo</th>
@@ -1218,7 +1504,7 @@ export default function OvertimePage() {
                 <tbody className="divide-y divide-slate-50">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="text-center py-12 text-slate-400">
+                      <td colSpan={11} className="text-center py-12 text-slate-400">
                         {loading ? 'Carregando...' : 'Nenhum colaborador encontrado com os filtros selecionados.'}
                       </td>
                     </tr>
@@ -1230,8 +1516,16 @@ export default function OvertimePage() {
                       return (
                         <tr
                           key={item.employee.id}
-                          className={`hover:bg-slate-50 transition-colors ${!item.hasPunches ? 'opacity-60' : ''}`}
+                          className={`hover:bg-slate-50 transition-colors ${!item.hasPunches ? 'opacity-60' : ''} ${selectedIds.has(item.employee.id) ? 'bg-indigo-50/50' : ''}`}
                         >
+                          <td className="px-3 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(item.employee.id)}
+                              onChange={() => toggleSelect(item.employee.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </td>
                           <td className="px-4 py-3 text-slate-400 text-xs">{i + 1}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1.5">
@@ -1303,7 +1597,7 @@ export default function OvertimePage() {
                 {filtered.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-slate-200 bg-slate-50">
-                      <td colSpan={3} className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Total</td>
+                      <td colSpan={4} className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Total</td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-slate-900">
                         {fmtHHMM(filtered.reduce((s, e) => s + e.workedMinutes, 0))}
                       </td>
