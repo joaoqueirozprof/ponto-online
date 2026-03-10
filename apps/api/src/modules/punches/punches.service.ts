@@ -70,7 +70,15 @@ export class PunchesService {
         skip,
         take,
         include: {
-          employee: { select: { id: true, name: true } },
+          employee: {
+            select: {
+              id: true,
+              name: true,
+              schedule: {
+                include: { scheduleEntries: true },
+              },
+            },
+          },
           rawPunchEvent: { select: { id: true, importedAt: true } },
         },
         orderBy: { punchTime: 'desc' },

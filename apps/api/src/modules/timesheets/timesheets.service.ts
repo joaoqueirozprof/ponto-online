@@ -124,11 +124,14 @@ export class TimesheetsService {
         const scheduleEntry = scheduleByDay[dayOfWeek];
         const isHoliday = holidayDates.has(dateStr);
         const isWorkDay = scheduleEntry?.isWorkDay && !isHoliday;
+        const isSunday = dayOfWeek === 0;
+        const hasPunchesOnDay = dayPunches.length >= 2;
+        const treatAsWorkDay = isWorkDay || (isSunday && hasPunchesOnDay);
 
         let workedMinutes = 0;
         let status = 'NORMAL';
         if (isHoliday) status = 'HOLIDAY';
-        else if (!isWorkDay || dayOfWeek === 0) status = 'WEEKEND';
+        else if (!treatAsWorkDay && !hasPunchesOnDay) status = 'WEEKEND';
 
         if (dayPunches.length >= 2) {
           const sorted = [...dayPunches].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
@@ -164,11 +167,13 @@ export class TimesheetsService {
           }
           let overtimeMinutes = 0;
           let absenceMinutes = 0;
-          if (isWorkDay && expectedMinutes > 0) {
+          if (treatAsWorkDay && expectedMinutes > 0) {
             if (workedMinutes > expectedMinutes) overtimeMinutes = workedMinutes - expectedMinutes;
             else if (workedMinutes < expectedMinutes && workedMinutes > 0) absenceMinutes = expectedMinutes - workedMinutes;
             else if (workedMinutes === 0 && dayPunches.length === 0) absenceMinutes = expectedMinutes;
-          } else if (!isWorkDay && workedMinutes > 0) {
+          } else if (isSunday && hasPunchesOnDay && expectedMinutes === 0) {
+            // Sunday without schedule: count hours as normal work, no overtime
+          } else if (!treatAsWorkDay && workedMinutes > 0) {
             overtimeMinutes = workedMinutes;
           }
           totalWorked += workedMinutes;
@@ -317,8 +322,12 @@ export class TimesheetsService {
       const dayPunches = punchesByDate[dateStr] || [];
       const scheduleEntry = scheduleByDay[dayOfWeek];
       const isHoliday = holidayDates.has(dateStr);
-      const isWeekend = dayOfWeek === 0; // Sunday
       const isWorkDay = scheduleEntry?.isWorkDay && !isHoliday;
+      // Sunday: if isWorkDay is true in schedule, treat as normal work day.
+      // If isWorkDay is false but employee has punches, treat as normal work day (domingo caso a parte).
+      const isSunday = dayOfWeek === 0;
+      const hasPunchesOnDay = dayPunches.length >= 2;
+      const treatAsWorkDay = isWorkDay || (isSunday && hasPunchesOnDay);
 
       let workedMinutes = 0;
       let breakMinutes = 0;
@@ -327,7 +336,7 @@ export class TimesheetsService {
 
       if (isHoliday) {
         status = 'HOLIDAY';
-      } else if (!isWorkDay || isWeekend) {
+      } else if (!treatAsWorkDay && !hasPunchesOnDay) {
         status = 'WEEKEND';
       }
 
@@ -389,7 +398,7 @@ export class TimesheetsService {
       let absenceMinutes = 0;
       let lateMinutes = 0;
 
-      if (isWorkDay && expectedMinutes > 0) {
+      if (treatAsWorkDay && expectedMinutes > 0) {
         if (workedMinutes > expectedMinutes) {
           overtimeMinutes = workedMinutes - expectedMinutes;
         } else if (workedMinutes < expectedMinutes && workedMinutes > 0) {
@@ -398,7 +407,10 @@ export class TimesheetsService {
           absenceMinutes = expectedMinutes;
           status = 'ABSENCE';
         }
-      } else if (!isWorkDay && workedMinutes > 0) {
+      } else if (isSunday && hasPunchesOnDay && expectedMinutes === 0) {
+        // Sunday without schedule entry: count worked hours as normal (not overtime)
+        // The hours are simply recorded as worked time
+      } else if (!treatAsWorkDay && workedMinutes > 0) {
         overtimeMinutes = workedMinutes;
       }
 

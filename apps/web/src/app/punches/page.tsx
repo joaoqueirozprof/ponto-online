@@ -12,12 +12,25 @@ interface RawPunch {
   employee: { id: string; name: string; cpf: string } | null;
 }
 
+interface ScheduleEntry {
+  dayOfWeek: number;
+  startTime: string | null;
+  endTime: string | null;
+  breakStartTime: string | null;
+  breakEndTime: string | null;
+  isWorkDay: boolean;
+}
+
 interface NormalizedPunch {
   id: string;
   punchTime: string;
   punchType: string;
   status: string;
-  employee: { id: string; name: string } | null;
+  employee: {
+    id: string;
+    name: string;
+    schedule?: { scheduleEntries: ScheduleEntry[] } | null;
+  } | null;
 }
 
 interface Adjustment {
@@ -46,6 +59,7 @@ interface GroupedPunch {
   breakStart: NormalizedPunch | null;
   breakEnd: NormalizedPunch | null;
   exit: NormalizedPunch | null;
+  expectsBreak: boolean;
 }
 
 const PUNCH_TYPE_PT: Record<string, string> = {
@@ -337,16 +351,31 @@ export default function PunchesPage() {
 
       if (!map.has(key)) {
         const localDate = new Date(dateStr + 'T12:00:00');
+        const dow = localDate.getDay(); // 0=Sunday, 6=Saturday
+        // Check if schedule expects a break for this day of week
+        let expectsBreak = true; // default: assume 4 punches expected
+        const scheduleEntries = punch.employee.schedule?.scheduleEntries;
+        if (scheduleEntries) {
+          const dayEntry = scheduleEntries.find((se: ScheduleEntry) => se.dayOfWeek === dow);
+          if (dayEntry) {
+            // No break expected if breakStartTime is null/empty
+            expectsBreak = !!(dayEntry.breakStartTime && dayEntry.breakEndTime);
+          } else {
+            // No schedule entry for this day (e.g., Sunday) → no break expected
+            expectsBreak = false;
+          }
+        }
         map.set(key, {
           key,
           employeeName: punch.employee.name,
           employeeId: punch.employee.id,
           date: dateStr,
-          dayOfWeek: DAY_NAMES[localDate.getDay()],
+          dayOfWeek: DAY_NAMES[dow],
           entry: null,
           breakStart: null,
           breakEnd: null,
           exit: null,
+          expectsBreak,
         });
       }
 
@@ -883,8 +912,14 @@ export default function PunchesPage() {
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {paginatedGrouped.map((group) => {
                           const isWeekend = group.dayOfWeek === 'Dom' || group.dayOfWeek === 'Sáb';
+                          const isSunday = group.dayOfWeek === 'Dom';
                           const isIncomplete = group.entry && !group.exit;
-                          const hasAllPunches = group.entry && group.breakStart && group.breakEnd && group.exit;
+                          // Complete if: has entry+exit AND (has both break punches OR break is not expected for this day)
+                          const hasAllPunches = group.entry && group.exit && (
+                            (group.breakStart && group.breakEnd) || !group.expectsBreak
+                          );
+                          // Sunday special case: entry+exit = always complete (domingo é caso a parte)
+                          const isSundayComplete = isSunday && group.entry && group.exit;
                           return (
                             <tr key={group.key} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${isWeekend ? 'bg-orange-50/30 dark:bg-orange-900/10' : ''}`}>
                               <td className="px-4 py-3">
@@ -917,7 +952,7 @@ export default function PunchesPage() {
                                 {renderTimeCell(group.exit, 'text-red-700 dark:text-red-300')}
                               </td>
                               <td className="px-3 py-3 text-center">
-                                {hasAllPunches ? (
+                                {(hasAllPunches || isSundayComplete) ? (
                                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                                     Completo
                                   </span>

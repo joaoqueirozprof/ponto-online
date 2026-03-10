@@ -158,14 +158,18 @@ export class ReportsService {
       const scheduleEntry = scheduleByDay[dayOfWeek];
       const isHoliday = holidayDates.has(dateStr);
       const isWorkDay = scheduleEntry?.isWorkDay && !isHoliday;
+      const isSunday = dayOfWeek === 0;
 
       // Skip future BRT days
       if (dateStr > todayStr) continue;
 
+      const hasPunchesOnDay = dayPunches.length >= 2;
+      const treatAsWorkDay = isWorkDay || (isSunday && hasPunchesOnDay);
+
       let workedMinutes = 0;
       let status = 'NORMAL';
       if (isHoliday) status = 'HOLIDAY';
-      else if (!isWorkDay || dayOfWeek === 0) status = 'WEEKEND';
+      else if (!treatAsWorkDay && !hasPunchesOnDay) status = 'WEEKEND';
 
       // Calculate worked time from punch pairs
       if (dayPunches.length >= 2) {
@@ -213,18 +217,17 @@ export class ReportsService {
       let absenceMinutes = 0;
       let lateMinutes = 0;
 
-      if (isWorkDay && expectedMinutes > 0) {
+      if (treatAsWorkDay && expectedMinutes > 0) {
         if (workedMinutes > expectedMinutes) {
           overtimeMinutes = workedMinutes - expectedMinutes;
         } else if (workedMinutes < expectedMinutes && workedMinutes > 0) {
           absenceMinutes = expectedMinutes - workedMinutes;
           // Check late arrival
-          if (dayPunches.length > 0 && scheduleEntry.startTime) {
+          if (dayPunches.length > 0 && scheduleEntry?.startTime) {
             const entry = dayPunches.find(p => p.type === 'ENTRY');
             if (entry) {
               const entryDate = new Date(entry.time);
               const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
-              // Schedule start in UTC: BRT time sh:sm = UTC (sh+3):sm on that calendar day
               const schedStartUtc = new Date(Date.UTC(year, month - 1, day, sh + 3, sm, 0, 0));
               const diff = Math.floor((entryDate.getTime() - schedStartUtc.getTime()) / 60000);
               if (diff > 5) lateMinutes = diff; // 5 min tolerance
@@ -233,7 +236,9 @@ export class ReportsService {
         } else if (workedMinutes === 0 && dayPunches.length === 0) {
           absenceMinutes = expectedMinutes;
         }
-      } else if (!isWorkDay && workedMinutes > 0) {
+      } else if (isSunday && hasPunchesOnDay && expectedMinutes === 0) {
+        // Sunday without schedule entry: count hours as normal work, not overtime
+      } else if (!treatAsWorkDay && workedMinutes > 0) {
         overtimeMinutes = workedMinutes;
       }
 
