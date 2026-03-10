@@ -9,7 +9,27 @@ export class AiAssistantService {
   private readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY || (process.env.OPENAI_KEY_B64 ? Buffer.from(process.env.OPENAI_KEY_B64, 'base64').toString('utf-8') : '');
   private readonly PDF_DIR = path.join(process.cwd(), 'generated-pdfs');
 
+  // Translation maps
+  private readonly PUNCH_TYPE_PT: Record<string, string> = {
+    ENTRY: 'Entrada', EXIT: 'Saída', BREAK_START: 'Início Intervalo', BREAK_END: 'Fim Intervalo',
+  };
+  private readonly STATUS_PT: Record<string, string> = {
+    NORMAL: 'Normal', ADJUSTED: 'Ajustado', MANUAL: 'Manual', OPEN: 'Aberta', CALCULATED: 'Calculada', APPROVED: 'Aprovada', LOCKED: 'Fechada',
+    WORK_DAY: 'Dia Útil', DAY_OFF: 'Folga', HOLIDAY: 'Feriado', ABSENCE: 'Falta', JUSTIFIED_ABSENCE: 'Falta Justificada',
+  };
+
   constructor(private prisma: PrismaService) {}
+
+  private fmtHM(m: number): string {
+    if (!m || isNaN(m)) return '0h00min';
+    const h = Math.floor(Math.abs(m) / 60);
+    const min = Math.abs(m) % 60;
+    const sign = m < 0 ? '-' : '';
+    return `${sign}${h}h${String(min).padStart(2, '0')}min`;
+  }
+
+  private translateType(type: string): string { return this.PUNCH_TYPE_PT[type] || type; }
+  private translateStatus(status: string): string { return this.STATUS_PT[status] || status; }
 
   // ==================== TOOL DEFINITIONS ====================
   private getTools() {
@@ -49,7 +69,7 @@ export class AiAssistantService {
         type: 'function' as const,
         function: {
           name: 'query_punches',
-          description: 'Consultar batidas/registros de ponto. Pode filtrar por funcionário, data, tipo de batida.',
+          description: 'Consultar batidas/registros de ponto. Retorna TODAS as batidas (Entrada, Saída, Intervalos) agrupadas por funcionário e dia, COM cálculo automático de horas trabalhadas e extras.',
           parameters: {
             type: 'object',
             properties: {
@@ -57,8 +77,7 @@ export class AiAssistantService {
               employeeName: { type: 'string', description: 'Nome do funcionário' },
               startDate: { type: 'string', description: 'Data inicial (YYYY-MM-DD)' },
               endDate: { type: 'string', description: 'Data final (YYYY-MM-DD)' },
-              punchType: { type: 'string', description: 'Tipo: ENTRY, EXIT, BREAK_START, BREAK_END' },
-              limit: { type: 'number', description: 'Limite de resultados (padrão 50)' },
+              limit: { type: 'number', description: 'Limite de resultados (padrão 100)' },
             },
           },
         },
@@ -311,24 +330,24 @@ export class AiAssistantService {
 
     return JSON.stringify({
       total: employees.length,
-      employees: employees.map(e => ({
+      funcionarios: employees.map(e => ({
         id: e.id,
-        name: e.name,
+        nome: e.name,
         cpf: e.cpf,
         pis: e.pis,
-        position: e.position,
-        department: e.department,
-        schedule: e.schedule?.name,
-        branch: e.branch?.name,
-        isActive: e.isActive,
-        admissionDate: e.admissionDate,
+        cargo: e.position,
+        departamento: e.department,
+        escala: e.schedule?.name,
+        filial: e.branch?.name,
+        ativo: e.isActive,
+        dataAdmissao: e.admissionDate,
       })),
     });
   }
 
   private async getEmployeeDetails(args: any): Promise<string> {
     const empId = await this.resolveEmployeeId(args);
-    if (!empId) return JSON.stringify({ error: 'Funcionário não encontrado' });
+    if (!empId) return JSON.stringify({ erro: 'Funcionário não encontrado' });
 
     const now = new Date();
     const employee = await this.prisma.employee.findUnique({
@@ -348,45 +367,46 @@ export class AiAssistantService {
       },
     });
 
-    if (!employee) return JSON.stringify({ error: 'Funcionário não encontrado' });
+    if (!employee) return JSON.stringify({ erro: 'Funcionário não encontrado' });
 
+    const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     return JSON.stringify({
       id: employee.id,
-      name: employee.name,
+      nome: employee.name,
       cpf: employee.cpf,
       pis: employee.pis,
-      registration: employee.registration,
+      matricula: employee.registration,
       email: employee.email,
-      phone: employee.phone,
-      position: employee.position,
-      department: employee.department,
-      branch: employee.branch?.name,
-      isActive: employee.isActive,
-      admissionDate: employee.admissionDate,
-      terminationDate: employee.terminationDate,
-      schedule: employee.schedule ? {
-        name: employee.schedule.name,
-        entries: employee.schedule.scheduleEntries.map(se => ({
-          day: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][se.dayOfWeek],
-          start: se.startTime,
-          end: se.endTime,
-          breakStart: se.breakStartTime,
-          breakEnd: se.breakEndTime,
-          isWorkDay: se.isWorkDay,
+      telefone: employee.phone,
+      cargo: employee.position,
+      departamento: employee.department,
+      filial: employee.branch?.name,
+      ativo: employee.isActive,
+      dataAdmissao: employee.admissionDate,
+      dataDemissao: employee.terminationDate,
+      escala: employee.schedule ? {
+        nome: employee.schedule.name,
+        horarios: employee.schedule.scheduleEntries.map(se => ({
+          dia: dayNames[se.dayOfWeek],
+          entrada: se.startTime,
+          saida: se.endTime,
+          inicioIntervalo: se.breakStartTime,
+          fimIntervalo: se.breakEndTime,
+          diaTrabalho: se.isWorkDay,
         })),
       } : null,
-      currentTimesheet: employee.timesheets[0] ? {
-        status: employee.timesheets[0].status,
-        workedMinutes: employee.timesheets[0].totalWorkedMinutes,
-        overtimeMinutes: employee.timesheets[0].totalOvertimeMinutes,
-        absenceMinutes: employee.timesheets[0].totalAbsenceMinutes,
-        lateMinutes: employee.timesheets[0].totalLateMinutes,
+      folhaPontoAtual: employee.timesheets[0] ? {
+        status: this.translateStatus(employee.timesheets[0].status),
+        horasTrabalhadas: this.fmtHM(employee.timesheets[0].totalWorkedMinutes),
+        horasExtras: this.fmtHM(employee.timesheets[0].totalOvertimeMinutes),
+        horasFaltas: this.fmtHM(employee.timesheets[0].totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(employee.timesheets[0].totalLateMinutes),
       } : null,
-      recentPunches: employee.normalizedPunches.map(p => ({
+      ultimasBatidas: employee.normalizedPunches.map(p => ({
         id: p.id,
-        time: p.punchTime,
-        type: p.punchType,
-        status: p.status,
+        horario: new Date(p.punchTime).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        tipo: this.translateType(p.punchType),
+        status: this.translateStatus(p.status),
       })),
     });
   }
@@ -395,7 +415,7 @@ export class AiAssistantService {
     const where: any = {};
     const empId = await this.resolveEmployeeId(args);
     if (empId) where.employeeId = empId;
-    if (args.punchType) where.punchType = args.punchType;
+    // Do NOT filter by punchType - always return ALL types
     if (args.startDate || args.endDate) {
       where.punchTime = {};
       if (args.startDate) where.punchTime.gte = new Date(`${args.startDate}T00:00:00.000Z`);
@@ -404,23 +424,98 @@ export class AiAssistantService {
 
     const punches = await this.prisma.normalizedPunch.findMany({
       where,
-      take: args.limit || 50,
-      orderBy: { punchTime: 'desc' },
-      include: { employee: { select: { id: true, name: true } } },
+      take: args.limit || 100,
+      orderBy: { punchTime: 'asc' },
+      include: { employee: { select: { id: true, name: true, department: true, schedule: { select: { weeklyHours: true } } } } },
     });
 
-    return JSON.stringify({
-      total: punches.length,
-      punches: punches.map(p => ({
+    // Group punches by employee + day for overtime calculation
+    const grouped: Record<string, { employeeName: string; department: string; weeklyHours: number; days: Record<string, any[]> }> = {};
+    punches.forEach(p => {
+      const empKey = p.employeeId;
+      if (!grouped[empKey]) {
+        grouped[empKey] = {
+          employeeName: p.employee?.name || '',
+          department: p.employee?.department || '',
+          weeklyHours: p.employee?.schedule?.weeklyHours || 44,
+          days: {},
+        };
+      }
+      const dayKey = new Date(p.punchTime).toISOString().split('T')[0];
+      if (!grouped[empKey].days[dayKey]) grouped[empKey].days[dayKey] = [];
+      grouped[empKey].days[dayKey].push({
         id: p.id,
-        employee: p.employee?.name,
-        employeeId: p.employeeId,
-        time: p.punchTime,
-        type: p.punchType,
-        status: p.status,
-        adjustedBy: p.adjustedBy,
-        adjustmentReason: p.adjustmentReason,
-      })),
+        horario: new Date(p.punchTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
+        tipo: this.translateType(p.punchType),
+        tipoOriginal: p.punchType,
+        status: this.translateStatus(p.status),
+      });
+    });
+
+    // Calculate hours per day
+    const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const resultado: any[] = [];
+    let totalMinutosTrabalhados = 0;
+    let totalMinutosExtras = 0;
+
+    for (const [empId, data] of Object.entries(grouped)) {
+      const dailyExpectedHours = data.weeklyHours / 6; // 6 working days
+      const empResult: any = {
+        funcionario: data.employeeName,
+        departamento: data.department,
+        dias: [],
+      };
+
+      for (const [dayStr, dayPunches] of Object.entries(data.days)) {
+        const d = new Date(dayStr + 'T12:00:00Z');
+        const entries = dayPunches.filter((p: any) => p.tipoOriginal === 'ENTRY');
+        const exits = dayPunches.filter((p: any) => p.tipoOriginal === 'EXIT');
+
+        // Calculate worked minutes from entry/exit pairs
+        let workedMinutes = 0;
+        const minPairs = Math.min(entries.length, exits.length);
+        for (let i = 0; i < minPairs; i++) {
+          const entryTime = dayPunches.find((p: any) => p.tipoOriginal === 'ENTRY' && dayPunches.indexOf(p) >= i * 2);
+          const exitTime = dayPunches.find((p: any) => p.tipoOriginal === 'EXIT' && dayPunches.indexOf(p) > dayPunches.indexOf(entryTime));
+          if (entryTime && exitTime) {
+            const [eh, em] = entryTime.horario.split(':').map(Number);
+            const [xh, xm] = exitTime.horario.split(':').map(Number);
+            workedMinutes += (xh * 60 + xm) - (eh * 60 + em);
+          }
+        }
+
+        // Subtract break time
+        const breakStarts = dayPunches.filter((p: any) => p.tipoOriginal === 'BREAK_START');
+        const breakEnds = dayPunches.filter((p: any) => p.tipoOriginal === 'BREAK_END');
+        for (let i = 0; i < Math.min(breakStarts.length, breakEnds.length); i++) {
+          const [bsh, bsm] = breakStarts[i].horario.split(':').map(Number);
+          const [beh, bem] = breakEnds[i].horario.split(':').map(Number);
+          workedMinutes -= (beh * 60 + bem) - (bsh * 60 + bsm);
+        }
+
+        const expectedMinutes = dailyExpectedHours * 60;
+        const overtimeMinutes = Math.max(0, workedMinutes - expectedMinutes);
+        totalMinutosTrabalhados += workedMinutes;
+        totalMinutosExtras += overtimeMinutes;
+
+        empResult.dias.push({
+          data: d.toLocaleDateString('pt-BR'),
+          diaSemana: dayNames[d.getDay()],
+          batidas: dayPunches.map((p: any) => `${p.horario} (${p.tipo})`),
+          totalBatidas: dayPunches.length,
+          horasTrabalhadas: this.fmtHM(workedMinutes),
+          horasExtras: overtimeMinutes > 0 ? this.fmtHM(overtimeMinutes) : '0h00min',
+        });
+      }
+      resultado.push(empResult);
+    }
+
+    return JSON.stringify({
+      totalBatidas: punches.length,
+      totalHorasTrabalhadas: this.fmtHM(totalMinutosTrabalhados),
+      totalHorasExtras: this.fmtHM(totalMinutosExtras),
+      funcionarios: resultado,
+      instrucao: 'Os dados acima já incluem TODAS as batidas (Entrada, Saída, Início/Fim Intervalo) com cálculo de horas trabalhadas e extras. Apresente TODAS as batidas ao usuário, organizadas por dia.',
     });
   }
 
@@ -441,20 +536,19 @@ export class AiAssistantService {
 
     return JSON.stringify({
       total: timesheets.length,
-      timesheets: timesheets.map(ts => ({
+      folhasPonto: timesheets.map(ts => ({
         id: ts.id,
-        employee: ts.employee?.name,
-        employeeId: ts.employeeId,
-        department: ts.employee?.department,
-        month: ts.month,
-        year: ts.year,
-        status: ts.status,
-        workedMinutes: ts.totalWorkedMinutes,
-        overtimeMinutes: ts.totalOvertimeMinutes,
-        absenceMinutes: ts.totalAbsenceMinutes,
-        lateMinutes: ts.totalLateMinutes,
-        nightMinutes: ts.totalNightMinutes,
-        balanceMinutes: ts.totalBalanceMinutes,
+        funcionario: ts.employee?.name,
+        departamento: ts.employee?.department,
+        mes: ts.month,
+        ano: ts.year,
+        status: this.translateStatus(ts.status),
+        horasTrabalhadas: this.fmtHM(ts.totalWorkedMinutes),
+        horasExtras: this.fmtHM(ts.totalOvertimeMinutes),
+        horasFaltas: this.fmtHM(ts.totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(ts.totalLateMinutes),
+        horasNoturnas: this.fmtHM(ts.totalNightMinutes),
+        saldo: this.fmtHM(ts.totalBalanceMinutes),
       })),
     });
   }
@@ -472,30 +566,30 @@ export class AiAssistantService {
       },
     });
 
-    if (!timesheet) return JSON.stringify({ error: 'Folha de ponto não encontrada' });
+    if (!timesheet) return JSON.stringify({ erro: 'Folha de ponto não encontrada' });
 
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     return JSON.stringify({
-      employee: timesheet.employee?.name,
-      month: timesheet.month,
-      year: timesheet.year,
-      status: timesheet.status,
-      totals: {
-        worked: timesheet.totalWorkedMinutes,
-        overtime: timesheet.totalOvertimeMinutes,
-        absence: timesheet.totalAbsenceMinutes,
-        late: timesheet.totalLateMinutes,
+      funcionario: timesheet.employee?.name,
+      mes: timesheet.month,
+      ano: timesheet.year,
+      status: this.translateStatus(timesheet.status),
+      totais: {
+        horasTrabalhadas: this.fmtHM(timesheet.totalWorkedMinutes),
+        horasExtras: this.fmtHM(timesheet.totalOvertimeMinutes),
+        horasFaltas: this.fmtHM(timesheet.totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(timesheet.totalLateMinutes),
       },
-      days: timesheet.timesheetDays.map(d => ({
-        date: d.date,
-        dayOfWeek: dayNames[new Date(d.date).getDay()],
-        status: d.status,
-        workedMinutes: d.workedMinutes,
-        overtimeMinutes: d.overtimeMinutes,
-        absenceMinutes: d.absenceMinutes,
-        lateMinutes: d.lateMinutes,
-        punchCount: d.punchCount,
-        notes: d.notes,
+      dias: timesheet.timesheetDays.map(d => ({
+        data: new Date(d.date).toLocaleDateString('pt-BR'),
+        diaSemana: dayNames[new Date(d.date).getDay()],
+        status: this.translateStatus(d.status),
+        horasTrabalhadas: this.fmtHM(d.workedMinutes),
+        horasExtras: this.fmtHM(d.overtimeMinutes),
+        horasFaltas: this.fmtHM(d.absenceMinutes),
+        horasAtraso: this.fmtHM(d.lateMinutes),
+        quantidadeBatidas: d.punchCount,
+        observacoes: d.notes,
       })),
     });
   }
@@ -516,19 +610,19 @@ export class AiAssistantService {
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     return JSON.stringify({
       total: schedules.length,
-      schedules: schedules.map(s => ({
+      escalas: schedules.map(s => ({
         id: s.id,
-        name: s.name,
-        type: s.type,
-        weeklyHours: s.weeklyHours,
-        employeeCount: s._count.employees,
-        entries: s.scheduleEntries.map(se => ({
-          day: dayNames[se.dayOfWeek],
-          start: se.startTime,
-          end: se.endTime,
-          breakStart: se.breakStartTime,
-          breakEnd: se.breakEndTime,
-          isWorkDay: se.isWorkDay,
+        nome: s.name,
+        tipo: s.type,
+        horasSemanais: s.weeklyHours,
+        totalFuncionarios: s._count.employees,
+        horarios: s.scheduleEntries.map(se => ({
+          dia: dayNames[se.dayOfWeek],
+          entrada: se.startTime,
+          saida: se.endTime,
+          inicioIntervalo: se.breakStartTime,
+          fimIntervalo: se.breakEndTime,
+          diaTrabalho: se.isWorkDay,
         })),
       })),
     });
@@ -548,18 +642,16 @@ export class AiAssistantService {
 
     const totalOvertime = timesheets.reduce((sum, ts) => sum + ts.totalOvertimeMinutes, 0);
     return JSON.stringify({
-      report: 'Relatório de Horas Extras',
-      period: `${String(args.month).padStart(2, '0')}/${args.year}`,
-      totalEmployees: timesheets.length,
-      totalOvertimeMinutes: totalOvertime,
-      totalOvertimeFormatted: `${Math.floor(totalOvertime / 60)}h${String(totalOvertime % 60).padStart(2, '0')}min`,
-      employees: timesheets.map(ts => ({
-        name: ts.employee?.name,
-        department: ts.employee?.department,
-        position: ts.employee?.position,
-        overtimeMinutes: ts.totalOvertimeMinutes,
-        overtimeFormatted: `${Math.floor(ts.totalOvertimeMinutes / 60)}h${String(ts.totalOvertimeMinutes % 60).padStart(2, '0')}min`,
-        workedMinutes: ts.totalWorkedMinutes,
+      relatorio: 'Relatório de Horas Extras',
+      periodo: `${String(args.month).padStart(2, '0')}/${args.year}`,
+      totalFuncionarios: timesheets.length,
+      totalHorasExtras: this.fmtHM(totalOvertime),
+      funcionarios: timesheets.map(ts => ({
+        nome: ts.employee?.name,
+        departamento: ts.employee?.department,
+        cargo: ts.employee?.position,
+        horasExtras: this.fmtHM(ts.totalOvertimeMinutes),
+        horasTrabalhadas: this.fmtHM(ts.totalWorkedMinutes),
       })),
     });
   }
@@ -578,22 +670,21 @@ export class AiAssistantService {
 
     const totalAbsence = timesheets.reduce((sum, ts) => sum + ts.totalAbsenceMinutes, 0);
     return JSON.stringify({
-      report: 'Relatório de Faltas/Ausências',
-      period: `${String(args.month).padStart(2, '0')}/${args.year}`,
-      totalEmployees: timesheets.length,
-      totalAbsenceMinutes: totalAbsence,
-      employees: timesheets.map(ts => ({
-        name: ts.employee?.name,
-        department: ts.employee?.department,
-        absenceMinutes: ts.totalAbsenceMinutes,
-        absenceFormatted: `${Math.floor(ts.totalAbsenceMinutes / 60)}h${String(ts.totalAbsenceMinutes % 60).padStart(2, '0')}min`,
+      relatorio: 'Relatório de Faltas/Ausências',
+      periodo: `${String(args.month).padStart(2, '0')}/${args.year}`,
+      totalFuncionarios: timesheets.length,
+      totalHorasFaltas: this.fmtHM(totalAbsence),
+      funcionarios: timesheets.map(ts => ({
+        nome: ts.employee?.name,
+        departamento: ts.employee?.department,
+        horasFaltas: this.fmtHM(ts.totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(ts.totalLateMinutes),
       })),
     });
   }
 
   private async generateAttendanceReport(args: any): Promise<string> {
     if (args.date) {
-      // Daily report
       const startOfDay = new Date(`${args.date}T00:00:00.000Z`);
       const endOfDay = new Date(`${args.date}T23:59:59.999Z`);
       const punches = await this.prisma.normalizedPunch.findMany({
@@ -606,17 +697,16 @@ export class AiAssistantService {
       const totalEmployees = await this.prisma.employee.count({ where: { isActive: true } });
 
       return JSON.stringify({
-        report: 'Relatório de Presença Diário',
-        date: args.date,
-        totalActive: totalEmployees,
-        present: presentIds.size,
-        absent: totalEmployees - presentIds.size,
-        attendanceRate: `${((presentIds.size / totalEmployees) * 100).toFixed(1)}%`,
-        presentEmployees: [...new Set(punches.map(p => p.employee?.name))].filter(Boolean),
+        relatorio: 'Relatório de Presença Diário',
+        data: args.date,
+        totalAtivos: totalEmployees,
+        presentes: presentIds.size,
+        ausentes: totalEmployees - presentIds.size,
+        taxaPresenca: `${((presentIds.size / totalEmployees) * 100).toFixed(1)}%`,
+        funcionariosPresentes: [...new Set(punches.map(p => p.employee?.name))].filter(Boolean),
       });
     }
 
-    // Monthly summary
     const month = args.month || new Date().getMonth() + 1;
     const year = args.year || new Date().getFullYear();
     const timesheets = await this.prisma.timesheet.findMany({
@@ -626,28 +716,27 @@ export class AiAssistantService {
     });
 
     return JSON.stringify({
-      report: 'Relatório de Frequência Mensal',
-      period: `${String(month).padStart(2, '0')}/${year}`,
-      totalEmployees: timesheets.length,
-      employees: timesheets.map(ts => ({
-        name: ts.employee?.name,
-        department: ts.employee?.department,
-        workedMinutes: ts.totalWorkedMinutes,
-        absenceMinutes: ts.totalAbsenceMinutes,
-        lateMinutes: ts.totalLateMinutes,
-        status: ts.status,
+      relatorio: 'Relatório de Frequência Mensal',
+      periodo: `${String(month).padStart(2, '0')}/${year}`,
+      totalFuncionarios: timesheets.length,
+      funcionarios: timesheets.map(ts => ({
+        nome: ts.employee?.name,
+        departamento: ts.employee?.department,
+        horasTrabalhadas: this.fmtHM(ts.totalWorkedMinutes),
+        horasFaltas: this.fmtHM(ts.totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(ts.totalLateMinutes),
+        status: this.translateStatus(ts.status),
       })),
     });
   }
 
   private async adjustPunch(args: any): Promise<string> {
     const empId = await this.resolveEmployeeId(args);
-    if (!empId) return JSON.stringify({ error: 'Funcionário não encontrado' });
+    if (!empId) return JSON.stringify({ erro: 'Funcionário não encontrado' });
 
     if (args.punchId) {
-      // Adjust existing punch
       const punch = await this.prisma.normalizedPunch.findUnique({ where: { id: args.punchId } });
-      if (!punch) return JSON.stringify({ error: 'Batida não encontrada' });
+      if (!punch) return JSON.stringify({ erro: 'Batida não encontrada' });
 
       const newDateTime = new Date(punch.punchTime);
       if (args.newTime) {
@@ -677,10 +766,9 @@ export class AiAssistantService {
         },
       });
 
-      return JSON.stringify({ success: true, message: `Batida ajustada de ${punch.punchTime} para ${newDateTime.toISOString()}`, reason: args.reason });
+      return JSON.stringify({ sucesso: true, mensagem: `Batida ajustada de ${punch.punchTime} para ${newDateTime.toISOString()}`, motivo: args.reason });
     }
 
-    // Find punch by date and approximate time
     if (args.date && args.originalTime) {
       const [h, m] = args.originalTime.split(':').map(Number);
       const searchStart = new Date(`${args.date}T${String(h).padStart(2, '0')}:${String(Math.max(0, m - 5)).padStart(2, '0')}:00.000Z`);
@@ -714,21 +802,20 @@ export class AiAssistantService {
           },
         });
 
-        return JSON.stringify({ success: true, message: `Batida ajustada de ${args.originalTime} para ${args.newTime} em ${args.date}`, reason: args.reason });
+        return JSON.stringify({ sucesso: true, mensagem: `Batida ajustada de ${args.originalTime} para ${args.newTime} em ${args.date}`, motivo: args.reason });
       }
-      return JSON.stringify({ error: 'Batida não encontrada no horário informado' });
+      return JSON.stringify({ erro: 'Batida não encontrada no horário informado' });
     }
 
-    return JSON.stringify({ error: 'Informe punchId ou date+originalTime para identificar a batida' });
+    return JSON.stringify({ erro: 'Informe punchId ou date+originalTime para identificar a batida' });
   }
 
   private async addManualPunch(args: any): Promise<string> {
     const empId = await this.resolveEmployeeId(args);
-    if (!empId) return JSON.stringify({ error: 'Funcionário não encontrado' });
+    if (!empId) return JSON.stringify({ erro: 'Funcionário não encontrado' });
 
     const punchTime = new Date(`${args.date}T${args.time}:00.000Z`);
 
-    // Create raw event
     const rawEvent = await this.prisma.rawPunchEvent.create({
       data: {
         employeeId: empId,
@@ -738,7 +825,6 @@ export class AiAssistantService {
       },
     });
 
-    // Create normalized punch
     await this.prisma.normalizedPunch.create({
       data: {
         rawPunchEventId: rawEvent.id,
@@ -753,22 +839,22 @@ export class AiAssistantService {
 
     const employee = await this.prisma.employee.findUnique({ where: { id: empId }, select: { name: true } });
     return JSON.stringify({
-      success: true,
-      message: `Batida manual adicionada para ${employee?.name}: ${args.punchType} às ${args.time} em ${args.date}`,
-      reason: args.reason,
+      sucesso: true,
+      mensagem: `Batida manual adicionada para ${employee?.name}: ${this.translateType(args.punchType)} às ${args.time} em ${args.date}`,
+      motivo: args.reason,
     });
   }
 
   private async runCustomQuery(args: any): Promise<string> {
     const sql = args.sql.trim().toUpperCase();
     if (!sql.startsWith('SELECT')) {
-      return JSON.stringify({ error: 'Apenas consultas SELECT são permitidas por segurança' });
+      return JSON.stringify({ erro: 'Apenas consultas SELECT são permitidas por segurança' });
     }
     try {
       const result = await this.prisma.$queryRawUnsafe(args.sql);
-      return JSON.stringify({ description: args.description, data: result });
+      return JSON.stringify({ descricao: args.description, dados: result });
     } catch (error: any) {
-      return JSON.stringify({ error: `Erro na query: ${error.message}` });
+      return JSON.stringify({ erro: `Erro na query: ${error.message}` });
     }
   }
 
@@ -784,78 +870,133 @@ export class AiAssistantService {
     const totalAbsence = timesheets.reduce((s, t) => s + t.totalAbsenceMinutes, 0);
     const totalLate = timesheets.reduce((s, t) => s + t.totalLateMinutes, 0);
 
-    const fmtHM = (m: number) => `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}min`;
-
     return JSON.stringify({
-      report: 'Relatório Resumo Mensal',
-      period: `${String(args.month).padStart(2, '0')}/${args.year}`,
-      totalEmployees: timesheets.length,
-      totals: {
-        worked: fmtHM(totalWorked),
-        overtime: fmtHM(totalOvertime),
-        absence: fmtHM(totalAbsence),
-        late: fmtHM(totalLate),
+      relatorio: 'Relatório Resumo Mensal',
+      periodo: `${String(args.month).padStart(2, '0')}/${args.year}`,
+      totalFuncionarios: timesheets.length,
+      totaisGerais: {
+        horasTrabalhadas: this.fmtHM(totalWorked),
+        horasExtras: this.fmtHM(totalOvertime),
+        horasFaltas: this.fmtHM(totalAbsence),
+        horasAtraso: this.fmtHM(totalLate),
       },
-      employees: timesheets.map(ts => ({
-        name: ts.employee?.name,
-        department: ts.employee?.department,
-        position: ts.employee?.position,
-        schedule: ts.employee?.schedule?.name,
-        worked: fmtHM(ts.totalWorkedMinutes),
-        overtime: fmtHM(ts.totalOvertimeMinutes),
-        absence: fmtHM(ts.totalAbsenceMinutes),
-        late: fmtHM(ts.totalLateMinutes),
-        balance: fmtHM(ts.totalBalanceMinutes),
-        status: ts.status,
+      funcionarios: timesheets.map(ts => ({
+        nome: ts.employee?.name,
+        departamento: ts.employee?.department,
+        cargo: ts.employee?.position,
+        escala: ts.employee?.schedule?.name,
+        horasTrabalhadas: this.fmtHM(ts.totalWorkedMinutes),
+        horasExtras: this.fmtHM(ts.totalOvertimeMinutes),
+        horasFaltas: this.fmtHM(ts.totalAbsenceMinutes),
+        horasAtraso: this.fmtHM(ts.totalLateMinutes),
+        saldo: this.fmtHM(ts.totalBalanceMinutes),
+        status: this.translateStatus(ts.status),
       })),
     });
   }
 
-  // ==================== PDF GENERATION ====================
+  // ==================== PDF GENERATION (IMPROVED) ====================
 
   private async generatePdfReport(args: any): Promise<string> {
     try {
       const PDFDocument = (await import('pdfkit')).default;
       if (!fs.existsSync(this.PDF_DIR)) fs.mkdirSync(this.PDF_DIR, { recursive: true });
 
-      const fmtHM = (m: number) => `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}min`;
       const monthNames = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
       const fileName = `relatorio-${args.reportType}-${args.month}-${args.year}-${Date.now()}.pdf`;
       const filePath = path.join(this.PDF_DIR, fileName);
 
-      const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+      const doc = new PDFDocument({ size: 'A4', margin: 35, bufferPages: true });
       const stream = fs.createWriteStream(filePath);
       doc.pipe(stream);
 
-      // Header
-      doc.rect(0, 0, doc.page.width, 80).fill('#4F46E5');
-      doc.fontSize(20).fillColor('#FFFFFF').text('Ponto Online', 40, 20);
-      doc.fontSize(10).fillColor('#C7D2FE').text('Sistema de Controle de Ponto Eletrônico', 40, 45);
-      doc.fontSize(9).text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 40, 60);
+      const pageW = doc.page.width;
+      const contentW = pageW - 70; // 35px margins each side
 
-      doc.moveDown(2);
-      doc.y = 100;
+      // ==================== HEADER ====================
+      const drawHeader = (title: string, subtitle: string) => {
+        // Gradient-like header
+        doc.rect(0, 0, pageW, 90).fill('#1E293B');
+        doc.rect(0, 85, pageW, 5).fill('#4F46E5');
 
+        doc.fontSize(22).fillColor('#FFFFFF').font('Helvetica-Bold').text('PONTO ONLINE', 40, 18);
+        doc.fontSize(9).fillColor('#94A3B8').font('Helvetica').text('Sistema de Controle de Ponto Eletrônico', 40, 44);
+
+        // Right-aligned date
+        doc.fontSize(8).fillColor('#94A3B8').text(
+          `Gerado: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
+          pageW - 200, 18, { width: 160, align: 'right' }
+        );
+
+        doc.y = 105;
+
+        // Report title
+        doc.fontSize(18).fillColor('#1E293B').font('Helvetica-Bold').text(title, 35);
+        doc.fontSize(11).fillColor('#64748B').font('Helvetica').text(subtitle, 35);
+        doc.moveDown(0.8);
+      };
+
+      // ==================== SUMMARY BOXES ====================
+      const drawSummaryBox = (x: number, y: number, w: number, label: string, value: string, bgColor: string, borderColor: string, textColor: string) => {
+        // Rounded box effect
+        doc.rect(x, y, w, 55).fill(bgColor);
+        doc.rect(x, y, 4, 55).fill(borderColor); // Left accent bar
+        doc.fontSize(9).fillColor(textColor).font('Helvetica-Bold').text(label.toUpperCase(), x + 14, y + 10, { width: w - 20 });
+        doc.fontSize(20).fillColor('#1E293B').font('Helvetica-Bold').text(value, x + 14, y + 28, { width: w - 20 });
+      };
+
+      // ==================== TABLE ====================
       const drawTableHeader = (headers: string[], colWidths: number[], y: number) => {
-        let x = 40;
-        doc.rect(40, y, colWidths.reduce((a, b) => a + b, 0), 22).fill('#4F46E5');
+        let x = 35;
+        const totalW = colWidths.reduce((a, b) => a + b, 0);
+        doc.rect(35, y, totalW, 26).fill('#1E293B');
         headers.forEach((h, i) => {
-          doc.fontSize(8).fillColor('#FFFFFF').text(h, x + 4, y + 6, { width: colWidths[i] - 8 });
+          doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold').text(h.toUpperCase(), x + 5, y + 8, { width: colWidths[i] - 10 });
           x += colWidths[i];
         });
-        return y + 22;
+        return y + 26;
       };
 
-      const drawTableRow = (cells: string[], colWidths: number[], y: number, isEven: boolean) => {
-        let x = 40;
-        const rowColor = isEven ? '#F1F5F9' : '#FFFFFF';
-        doc.rect(40, y, colWidths.reduce((a, b) => a + b, 0), 18).fill(rowColor);
+      const drawTableRow = (cells: string[], colWidths: number[], y: number, isEven: boolean, highlights?: Record<number, string>) => {
+        let x = 35;
+        const totalW = colWidths.reduce((a, b) => a + b, 0);
+        const rowH = 20;
+        const rowColor = isEven ? '#F8FAFC' : '#FFFFFF';
+        doc.rect(35, y, totalW, rowH).fill(rowColor);
+
+        // Bottom border
+        doc.rect(35, y + rowH - 0.5, totalW, 0.5).fill('#E2E8F0');
+
         cells.forEach((c, i) => {
-          doc.fontSize(7).fillColor('#334155').text(c, x + 4, y + 5, { width: colWidths[i] - 8 });
+          const color = highlights?.[i] || '#334155';
+          doc.fontSize(7.5).fillColor(color).font(highlights?.[i] ? 'Helvetica-Bold' : 'Helvetica').text(c || '-', x + 5, y + 6, { width: colWidths[i] - 10 });
           x += colWidths[i];
         });
-        return y + 18;
+        return y + rowH;
       };
+
+      // ==================== TOTALS ROW ====================
+      const drawTotalsRow = (cells: string[], colWidths: number[], y: number) => {
+        let x = 35;
+        const totalW = colWidths.reduce((a, b) => a + b, 0);
+        doc.rect(35, y, totalW, 24).fill('#EEF2FF');
+        doc.rect(35, y, totalW, 1).fill('#4F46E5');
+        cells.forEach((c, i) => {
+          doc.fontSize(8).fillColor('#1E293B').font('Helvetica-Bold').text(c, x + 5, y + 7, { width: colWidths[i] - 10 });
+          x += colWidths[i];
+        });
+        return y + 24;
+      };
+
+      const checkPage = (y: number, headers: string[], widths: number[]): number => {
+        if (y > 740) {
+          doc.addPage();
+          return drawTableHeader(headers, widths, 35);
+        }
+        return y;
+      };
+
+      // ==================== REPORT TYPES ====================
 
       switch (args.reportType) {
         case 'horas_extras': {
@@ -870,37 +1011,38 @@ export class AiAssistantService {
           });
 
           const totalOT = timesheets.reduce((s, t) => s + t.totalOvertimeMinutes, 0);
+          const totalW = timesheets.reduce((s, t) => s + t.totalWorkedMinutes, 0);
 
-          doc.fontSize(16).fillColor('#1E293B').text(`Relatório de Horas Extras`, 40);
-          doc.fontSize(11).fillColor('#64748B').text(`${monthNames[args.month]} de ${args.year}`, 40);
-          doc.moveDown(0.5);
+          drawHeader('Relatório de Horas Extras', `${monthNames[args.month]} de ${args.year} — ${timesheets.length} funcionários`);
 
-          // Summary boxes
           const boxY = doc.y;
-          doc.rect(40, boxY, 160, 45).fill('#EEF2FF').stroke('#C7D2FE');
-          doc.fontSize(9).fillColor('#4F46E5').text('Total Funcionários', 50, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(`${timesheets.length}`, 50, boxY + 22);
+          drawSummaryBox(35, boxY, 165, 'Funcionários', `${timesheets.length}`, '#EEF2FF', '#4F46E5', '#4F46E5');
+          drawSummaryBox(210, boxY, 165, 'Total H. Extras', this.fmtHM(totalOT), '#FEF3C7', '#F59E0B', '#D97706');
+          drawSummaryBox(385, boxY, 170, 'Total Trabalhadas', this.fmtHM(totalW), '#DCFCE7', '#22C55E', '#16A34A');
 
-          doc.rect(210, boxY, 160, 45).fill('#FEF3C7').stroke('#FDE68A');
-          doc.fontSize(9).fillColor('#D97706').text('Total Horas Extras', 220, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(fmtHM(totalOT), 220, boxY + 22);
+          doc.y = boxY + 70;
 
-          doc.y = boxY + 60;
-
-          const headers = ['Nome', 'Departamento', 'Cargo', 'H. Extras', 'H. Trabalhadas'];
-          const widths = [150, 100, 100, 80, 85];
+          const headers = ['#', 'Nome', 'Departamento', 'Cargo', 'H. Extras', 'H. Trabalhadas'];
+          const widths = [25, 140, 95, 95, 80, 80];
           let y = drawTableHeader(headers, widths, doc.y);
 
           timesheets.forEach((ts, i) => {
-            if (y > 750) { doc.addPage(); y = 40; y = drawTableHeader(headers, widths, y); }
+            y = checkPage(y, headers, widths);
+            // Highlight overtime > 20h in red
+            const otColor = ts.totalOvertimeMinutes > 1200 ? '#DC2626' : ts.totalOvertimeMinutes > 600 ? '#D97706' : '#334155';
             y = drawTableRow([
+              `${i + 1}`,
               ts.employee?.name || '',
               ts.employee?.department || '',
               ts.employee?.position || '',
-              fmtHM(ts.totalOvertimeMinutes),
-              fmtHM(ts.totalWorkedMinutes),
-            ], widths, y, i % 2 === 0);
+              this.fmtHM(ts.totalOvertimeMinutes),
+              this.fmtHM(ts.totalWorkedMinutes),
+            ], widths, y, i % 2 === 0, { 4: otColor });
           });
+
+          // TOTALS ROW
+          y = checkPage(y, headers, widths);
+          y = drawTotalsRow(['', 'TOTAL GERAL', `${timesheets.length} func.`, '', this.fmtHM(totalOT), this.fmtHM(totalW)], widths, y);
           break;
         }
 
@@ -916,35 +1058,35 @@ export class AiAssistantService {
           });
 
           const totalAbs = timesheets.reduce((s, t) => s + t.totalAbsenceMinutes, 0);
+          const totalLate = timesheets.reduce((s, t) => s + t.totalLateMinutes, 0);
 
-          doc.fontSize(16).fillColor('#1E293B').text(`Relatório de Faltas e Ausências`, 40);
-          doc.fontSize(11).fillColor('#64748B').text(`${monthNames[args.month]} de ${args.year}`, 40);
-          doc.moveDown(0.5);
+          drawHeader('Relatório de Faltas e Ausências', `${monthNames[args.month]} de ${args.year}`);
 
           const boxY = doc.y;
-          doc.rect(40, boxY, 160, 45).fill('#FEE2E2').stroke('#FECACA');
-          doc.fontSize(9).fillColor('#DC2626').text('Funcionários com Faltas', 50, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(`${timesheets.length}`, 50, boxY + 22);
+          drawSummaryBox(35, boxY, 165, 'Com Faltas', `${timesheets.length}`, '#FEE2E2', '#EF4444', '#DC2626');
+          drawSummaryBox(210, boxY, 165, 'Total Faltas', this.fmtHM(totalAbs), '#FEE2E2', '#EF4444', '#DC2626');
+          drawSummaryBox(385, boxY, 170, 'Total Atrasos', this.fmtHM(totalLate), '#FEF3C7', '#F59E0B', '#D97706');
 
-          doc.rect(210, boxY, 160, 45).fill('#FEE2E2').stroke('#FECACA');
-          doc.fontSize(9).fillColor('#DC2626').text('Total Horas Ausência', 220, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(fmtHM(totalAbs), 220, boxY + 22);
+          doc.y = boxY + 70;
 
-          doc.y = boxY + 60;
-
-          const headers = ['Nome', 'Departamento', 'Horas Ausência', 'Atrasos'];
-          const widths = [180, 140, 100, 95];
+          const headers = ['#', 'Nome', 'Departamento', 'Horas Faltas', 'Horas Atraso'];
+          const widths = [25, 190, 140, 80, 80];
           let y = drawTableHeader(headers, widths, doc.y);
 
           timesheets.forEach((ts, i) => {
-            if (y > 750) { doc.addPage(); y = 40; y = drawTableHeader(headers, widths, y); }
+            y = checkPage(y, headers, widths);
+            const absColor = ts.totalAbsenceMinutes > 2400 ? '#DC2626' : ts.totalAbsenceMinutes > 480 ? '#D97706' : '#334155';
             y = drawTableRow([
+              `${i + 1}`,
               ts.employee?.name || '',
               ts.employee?.department || '',
-              fmtHM(ts.totalAbsenceMinutes),
-              fmtHM(ts.totalLateMinutes),
-            ], widths, y, i % 2 === 0);
+              this.fmtHM(ts.totalAbsenceMinutes),
+              this.fmtHM(ts.totalLateMinutes),
+            ], widths, y, i % 2 === 0, { 3: absColor });
           });
+
+          y = checkPage(y, headers, widths);
+          y = drawTotalsRow(['', 'TOTAL GERAL', `${timesheets.length} func.`, this.fmtHM(totalAbs), this.fmtHM(totalLate)], widths, y);
           break;
         }
 
@@ -958,41 +1100,43 @@ export class AiAssistantService {
           const totalW = timesheets.reduce((s, t) => s + t.totalWorkedMinutes, 0);
           const totalOT = timesheets.reduce((s, t) => s + t.totalOvertimeMinutes, 0);
           const totalAbs = timesheets.reduce((s, t) => s + t.totalAbsenceMinutes, 0);
+          const totalLate = timesheets.reduce((s, t) => s + t.totalLateMinutes, 0);
 
-          doc.fontSize(16).fillColor('#1E293B').text(`Relatório Resumo Mensal`, 40);
-          doc.fontSize(11).fillColor('#64748B').text(`${monthNames[args.month]} de ${args.year} — ${timesheets.length} funcionários`, 40);
-          doc.moveDown(0.5);
+          drawHeader('Relatório Resumo Mensal', `${monthNames[args.month]} de ${args.year} — ${timesheets.length} funcionários`);
 
           const boxY = doc.y;
-          const boxes = [
-            { label: 'H. Trabalhadas', val: fmtHM(totalW), bg: '#EEF2FF', border: '#C7D2FE', color: '#4F46E5' },
-            { label: 'H. Extras', val: fmtHM(totalOT), bg: '#FEF3C7', border: '#FDE68A', color: '#D97706' },
-            { label: 'Faltas', val: fmtHM(totalAbs), bg: '#FEE2E2', border: '#FECACA', color: '#DC2626' },
-          ];
-          boxes.forEach((b, i) => {
-            const bx = 40 + i * 175;
-            doc.rect(bx, boxY, 165, 45).fill(b.bg).stroke(b.border);
-            doc.fontSize(9).fillColor(b.color).text(b.label, bx + 10, boxY + 8);
-            doc.fontSize(16).fillColor('#1E293B').text(b.val, bx + 10, boxY + 22);
-          });
+          const bw = (contentW - 15) / 4; // 4 boxes
+          drawSummaryBox(35, boxY, bw, 'Trabalhadas', this.fmtHM(totalW), '#EEF2FF', '#4F46E5', '#4F46E5');
+          drawSummaryBox(35 + bw + 5, boxY, bw, 'Extras', this.fmtHM(totalOT), '#FEF3C7', '#F59E0B', '#D97706');
+          drawSummaryBox(35 + (bw + 5) * 2, boxY, bw, 'Faltas', this.fmtHM(totalAbs), '#FEE2E2', '#EF4444', '#DC2626');
+          drawSummaryBox(35 + (bw + 5) * 3, boxY, bw, 'Atrasos', this.fmtHM(totalLate), '#FFF7ED', '#F97316', '#EA580C');
 
-          doc.y = boxY + 60;
+          doc.y = boxY + 70;
 
-          const headers = ['Nome', 'Depto', 'Trabalhadas', 'Extras', 'Faltas', 'Atrasos'];
-          const widths = [140, 80, 80, 70, 70, 75];
+          const headers = ['#', 'Nome', 'Depto', 'Trabalhadas', 'Extras', 'Faltas', 'Atrasos'];
+          const widths = [22, 130, 80, 75, 70, 70, 68];
           let y = drawTableHeader(headers, widths, doc.y);
 
           timesheets.forEach((ts, i) => {
-            if (y > 750) { doc.addPage(); y = 40; y = drawTableHeader(headers, widths, y); }
+            y = checkPage(y, headers, widths);
+            const otColor = ts.totalOvertimeMinutes > 600 ? '#D97706' : '#334155';
+            const absColor = ts.totalAbsenceMinutes > 480 ? '#DC2626' : '#334155';
             y = drawTableRow([
+              `${i + 1}`,
               ts.employee?.name || '',
               ts.employee?.department || '',
-              fmtHM(ts.totalWorkedMinutes),
-              fmtHM(ts.totalOvertimeMinutes),
-              fmtHM(ts.totalAbsenceMinutes),
-              fmtHM(ts.totalLateMinutes),
-            ], widths, y, i % 2 === 0);
+              this.fmtHM(ts.totalWorkedMinutes),
+              this.fmtHM(ts.totalOvertimeMinutes),
+              this.fmtHM(ts.totalAbsenceMinutes),
+              this.fmtHM(ts.totalLateMinutes),
+            ], widths, y, i % 2 === 0, { 4: otColor, 5: absColor });
           });
+
+          y = checkPage(y, headers, widths);
+          y = drawTotalsRow([
+            '', 'TOTAL GERAL', `${timesheets.length} func.`,
+            this.fmtHM(totalW), this.fmtHM(totalOT), this.fmtHM(totalAbs), this.fmtHM(totalLate),
+          ], widths, y);
           break;
         }
 
@@ -1000,8 +1144,8 @@ export class AiAssistantService {
           const empId = await this.resolveEmployeeId({ employeeName: args.employeeName });
           if (!empId) {
             doc.end();
-            fs.unlinkSync(filePath);
-            return JSON.stringify({ error: 'Funcionário não encontrado para gerar PDF' });
+            try { fs.unlinkSync(filePath); } catch (e) {}
+            return JSON.stringify({ erro: 'Funcionário não encontrado para gerar PDF de batidas' });
           }
 
           const employee = await this.prisma.employee.findUnique({ where: { id: empId }, select: { name: true, department: true, position: true } });
@@ -1013,35 +1157,52 @@ export class AiAssistantService {
             orderBy: { punchTime: 'asc' },
           });
 
-          const punchTypeNames: Record<string, string> = { ENTRY: 'Entrada', EXIT: 'Saída', BREAK_START: 'Início Intervalo', BREAK_END: 'Fim Intervalo' };
+          drawHeader('Relatório de Batidas Individual', `${employee?.name || ''} — ${monthNames[args.month]} de ${args.year}`);
 
-          doc.fontSize(16).fillColor('#1E293B').text(`Relatório de Batidas`, 40);
-          doc.fontSize(12).fillColor('#4F46E5').text(employee?.name || '', 40);
-          doc.fontSize(10).fillColor('#64748B').text(`${employee?.department || ''} — ${employee?.position || ''} | ${monthNames[args.month]} de ${args.year}`, 40);
-          doc.moveDown(0.5);
+          // Employee info box
+          const infoY = doc.y;
+          doc.rect(35, infoY, contentW, 45).fill('#F8FAFC');
+          doc.rect(35, infoY, contentW, 0.5).fill('#E2E8F0');
+          doc.rect(35, infoY + 45, contentW, 0.5).fill('#E2E8F0');
+          doc.fontSize(9).fillColor('#64748B').font('Helvetica').text('Funcionário:', 45, infoY + 8);
+          doc.fontSize(10).fillColor('#1E293B').font('Helvetica-Bold').text(employee?.name || '', 120, infoY + 7);
+          doc.fontSize(9).fillColor('#64748B').font('Helvetica').text('Departamento:', 45, infoY + 22);
+          doc.fontSize(9).fillColor('#1E293B').font('Helvetica-Bold').text(employee?.department || '-', 130, infoY + 22);
+          doc.fontSize(9).fillColor('#64748B').font('Helvetica').text('Cargo:', 280, infoY + 22);
+          doc.fontSize(9).fillColor('#1E293B').font('Helvetica-Bold').text(employee?.position || '-', 320, infoY + 22);
+          doc.fontSize(9).fillColor('#64748B').font('Helvetica').text('Total de batidas:', 45, infoY + 35);
+          doc.fontSize(10).fillColor('#4F46E5').font('Helvetica-Bold').text(`${punches.length}`, 140, infoY + 34);
 
-          const boxY = doc.y;
-          doc.rect(40, boxY, 200, 40).fill('#EEF2FF').stroke('#C7D2FE');
-          doc.fontSize(9).fillColor('#4F46E5').text('Total de Batidas', 50, boxY + 8);
-          doc.fontSize(16).fillColor('#1E293B').text(`${punches.length}`, 50, boxY + 22);
-          doc.y = boxY + 55;
+          doc.y = infoY + 58;
 
-          const headers = ['Data', 'Dia', 'Tipo', 'Horário', 'Status'];
-          const widths = [90, 60, 120, 80, 165];
-          let y = drawTableHeader(headers, widths, doc.y);
           const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+          const headers = ['Data', 'Dia', 'Tipo', 'Horário', 'Status'];
+          const widths = [85, 55, 130, 80, 165];
+          let y = drawTableHeader(headers, widths, doc.y);
 
           punches.forEach((p, i) => {
-            if (y > 750) { doc.addPage(); y = 40; y = drawTableHeader(headers, widths, y); }
+            y = checkPage(y, headers, widths);
             const d = new Date(p.punchTime);
+            const typeColor = p.punchType === 'ENTRY' ? '#16A34A' : p.punchType === 'EXIT' ? '#DC2626' : '#D97706';
             y = drawTableRow([
               d.toLocaleDateString('pt-BR'),
               dayNames[d.getDay()],
-              punchTypeNames[p.punchType] || p.punchType,
+              this.translateType(p.punchType),
               d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-              p.status || 'NORMAL',
-            ], widths, y, i % 2 === 0);
+              this.translateStatus(p.status || 'NORMAL'),
+            ], widths, y, i % 2 === 0, { 2: typeColor });
           });
+
+          // Summary at end
+          y = checkPage(y, headers, widths);
+          y += 5;
+          const totalW = widths.reduce((a, b) => a + b, 0);
+          doc.rect(35, y, totalW, 24).fill('#EEF2FF');
+          doc.rect(35, y, totalW, 1).fill('#4F46E5');
+          const entries = punches.filter(p => p.punchType === 'ENTRY').length;
+          const exits = punches.filter(p => p.punchType === 'EXIT').length;
+          doc.fontSize(8).fillColor('#1E293B').font('Helvetica-Bold')
+            .text(`RESUMO: ${punches.length} batidas total — ${entries} entradas, ${exits} saídas — ${monthNames[args.month]} ${args.year}`, 45, y + 7, { width: totalW - 20 });
           break;
         }
 
@@ -1054,36 +1215,43 @@ export class AiAssistantService {
 
           const totalActive = await this.prisma.employee.count({ where: { isActive: true } });
           const withWork = timesheets.filter(t => t.totalWorkedMinutes > 0).length;
+          const totalW = timesheets.reduce((s, t) => s + t.totalWorkedMinutes, 0);
+          const totalAbs = timesheets.reduce((s, t) => s + t.totalAbsenceMinutes, 0);
 
-          doc.fontSize(16).fillColor('#1E293B').text(`Relatório de Frequência/Presença`, 40);
-          doc.fontSize(11).fillColor('#64748B').text(`${monthNames[args.month]} de ${args.year}`, 40);
-          doc.moveDown(0.5);
+          drawHeader('Relatório de Frequência/Presença', `${monthNames[args.month]} de ${args.year}`);
 
           const boxY = doc.y;
-          doc.rect(40, boxY, 160, 45).fill('#DCFCE7').stroke('#BBF7D0');
-          doc.fontSize(9).fillColor('#16A34A').text('Com Registro', 50, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(`${withWork}/${totalActive}`, 50, boxY + 22);
+          drawSummaryBox(35, boxY, 130, 'Com Registro', `${withWork}/${totalActive}`, '#DCFCE7', '#22C55E', '#16A34A');
+          drawSummaryBox(175, boxY, 130, 'Taxa Presença', `${((withWork / totalActive) * 100).toFixed(1)}%`, '#EEF2FF', '#4F46E5', '#4F46E5');
+          drawSummaryBox(315, boxY, 115, 'H. Trabalhadas', this.fmtHM(totalW), '#FFF7ED', '#F97316', '#EA580C');
+          drawSummaryBox(440, boxY, 115, 'H. Faltas', this.fmtHM(totalAbs), '#FEE2E2', '#EF4444', '#DC2626');
 
-          doc.rect(210, boxY, 160, 45).fill('#EEF2FF').stroke('#C7D2FE');
-          doc.fontSize(9).fillColor('#4F46E5').text('Taxa Presença', 220, boxY + 8);
-          doc.fontSize(18).fillColor('#1E293B').text(`${((withWork / totalActive) * 100).toFixed(1)}%`, 220, boxY + 22);
-          doc.y = boxY + 60;
+          doc.y = boxY + 70;
 
-          const headers = ['Nome', 'Departamento', 'H. Trabalhadas', 'Faltas', 'Atrasos', 'Status'];
-          const widths = [130, 100, 80, 70, 70, 65];
+          const headers = ['#', 'Nome', 'Departamento', 'Trabalhadas', 'Faltas', 'Atrasos', 'Status'];
+          const widths = [22, 130, 95, 75, 70, 70, 53];
           let y = drawTableHeader(headers, widths, doc.y);
 
           timesheets.forEach((ts, i) => {
-            if (y > 750) { doc.addPage(); y = 40; y = drawTableHeader(headers, widths, y); }
+            y = checkPage(y, headers, widths);
+            const absColor = ts.totalAbsenceMinutes > 480 ? '#DC2626' : '#334155';
+            const statusColor = ts.totalWorkedMinutes > 0 ? '#16A34A' : '#DC2626';
             y = drawTableRow([
+              `${i + 1}`,
               ts.employee?.name || '',
               ts.employee?.department || '',
-              fmtHM(ts.totalWorkedMinutes),
-              fmtHM(ts.totalAbsenceMinutes),
-              fmtHM(ts.totalLateMinutes),
-              ts.status,
-            ], widths, y, i % 2 === 0);
+              this.fmtHM(ts.totalWorkedMinutes),
+              this.fmtHM(ts.totalAbsenceMinutes),
+              this.fmtHM(ts.totalLateMinutes),
+              this.translateStatus(ts.status),
+            ], widths, y, i % 2 === 0, { 4: absColor, 6: statusColor });
           });
+
+          y = checkPage(y, headers, widths);
+          y = drawTotalsRow([
+            '', 'TOTAL GERAL', `${timesheets.length} func.`,
+            this.fmtHM(totalW), this.fmtHM(totalAbs), this.fmtHM(timesheets.reduce((s, t) => s + t.totalLateMinutes, 0)), '',
+          ], widths, y);
           break;
         }
       }
@@ -1092,27 +1260,33 @@ export class AiAssistantService {
       const pages = doc.bufferedPageRange();
       for (let i = pages.start; i < pages.start + pages.count; i++) {
         doc.switchToPage(i);
-        doc.rect(0, doc.page.height - 30, doc.page.width, 30).fill('#F1F5F9');
-        doc.fontSize(7).fillColor('#94A3B8').text(
-          `Ponto Online — Relatório gerado automaticamente pelo Assistente IA | Página ${i + 1} de ${pages.count}`,
-          40, doc.page.height - 20, { align: 'center', width: doc.page.width - 80 }
-        );
+        // Footer bar
+        doc.rect(0, doc.page.height - 35, pageW, 35).fill('#1E293B');
+        doc.fontSize(7).fillColor('#94A3B8').font('Helvetica')
+          .text(
+            `Ponto Online — Relatório gerado pelo Assistente IA — ${new Date().toLocaleDateString('pt-BR')}`,
+            40, doc.page.height - 22, { width: 300 }
+          );
+        doc.fontSize(7).fillColor('#94A3B8')
+          .text(
+            `Página ${i - pages.start + 1} de ${pages.count}`,
+            pageW - 120, doc.page.height - 22, { width: 80, align: 'right' }
+          );
       }
 
       doc.end();
-
       await new Promise<void>((resolve) => stream.on('finish', resolve));
 
       const downloadUrl = `/api/v1/ai-assistant/pdf/${fileName}`;
       return JSON.stringify({
-        success: true,
-        message: `PDF gerado com sucesso! Clique no link para baixar.`,
+        sucesso: true,
+        mensagem: `PDF gerado com sucesso! Use o botão abaixo para baixar.`,
         downloadUrl,
-        fileName,
+        nomeArquivo: fileName,
       });
     } catch (error: any) {
-      this.logger.error(`PDF generation error: ${error.message}`);
-      return JSON.stringify({ error: `Erro ao gerar PDF: ${error.message}` });
+      this.logger.error(`PDF generation error: ${error.message}`, error.stack);
+      return JSON.stringify({ erro: `Erro ao gerar PDF: ${error.message}` });
     }
   }
 
@@ -1126,62 +1300,71 @@ export class AiAssistantService {
   // ==================== MAIN CHAT ====================
 
   async chat(message: string, conversationHistory: { role: string; content: string }[]) {
-    const systemPrompt = `Você é o Assistente de RH do sistema Ponto Online. Você tem acesso COMPLETO ao banco de dados do sistema de ponto eletrônico e conhece TODAS as funcionalidades do sistema.
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
 
-SUAS CAPACIDADES:
-- Consultar qualquer informação sobre funcionários, batidas, escalas, folhas de ponto
-- Gerar relatórios detalhados (horas extras, faltas, presença, resumo mensal)
-- Ajustar batidas de ponto (alterar horário, adicionar batida manual)
-- Executar consultas SQL de leitura para dados específicos
-- Responder QUALQUER pergunta sobre QUALQUER funcionário
-- Guiar o RH em QUALQUER funcionalidade do sistema com links diretos para as páginas
+    const systemPrompt = `Você é o Assistente de RH do sistema Ponto Online. Você é ESPECIALISTA em gestão de ponto eletrônico e recursos humanos.
 
-MAPA COMPLETO DO SISTEMA (use para guiar o usuário):
-1. **Dashboard** (/dashboard) - Painel principal com estatísticas do mês: total de funcionários, batidas do dia, horas extras acumuladas, alertas e notificações do sistema.
-2. **Empresas** (/companies) - Cadastro e gestão de empresas. Criar, editar, ativar/desativar empresas. Configurações de CNPJ, razão social, endereço.
-3. **Filiais** (/branches) - Cadastro de filiais vinculadas às empresas. Cada filial tem nome, endereço e CNPJ próprio. Funcionários são vinculados a filiais.
-4. **Colaboradores** (/employees) - Cadastro completo de funcionários: nome, CPF, PIS, cargo, departamento, data admissão, escala de trabalho, filial. Ativar/desativar funcionários.
-5. **Dispositivos** (/devices) - Cadastro de relógios de ponto (Control iD). IP do dispositivo, modelo, filial vinculada. Sincronização de batidas.
-6. **Escalas** (/schedules) - Configuração de escalas de trabalho. Define horários de entrada, saída, intervalo para cada dia da semana. Tolerâncias de atraso.
-7. **Registros de Ponto** (/punches) - Visualização de todas as batidas registradas. Filtros por funcionário, data, tipo. Detalhes de cada batida (origem, dispositivo).
-8. **Folhas de Ponto** (/timesheets) - Folhas de ponto mensais por funcionário. Cálculo automático de horas trabalhadas, extras, faltas, atrasos. Status: OPEN, CALCULATED, APPROVED, LOCKED. Aprovação e fechamento de folhas.
-9. **Relatórios** (/reports) - Central de relatórios: faltas, horas extras, presença, resumo mensal. Filtros por período, departamento, funcionário.
-10. **Horas Extras** (/overtime) - Gestão específica de horas extras. Visualização detalhada por funcionário e período. Aprovação de horas extras.
-11. **Assistente IA** (/ai-assistant) - Versão em tela cheia deste assistente com mais espaço para relatórios extensos.
+## SUAS CAPACIDADES
+- Consultar QUALQUER informação: funcionários, batidas, escalas, folhas de ponto, horas extras
+- Gerar relatórios detalhados em tabela ou PDF para download/impressão
+- Ajustar e adicionar batidas manualmente
+- Executar consultas SQL de leitura
+- Guiar o RH pelo sistema com links diretos para cada página
+- Calcular horas extras, faltas, atrasos automaticamente
 
-COMO GUIAR O USUÁRIO:
-Quando o RH perguntar "como faço para..." ou "onde eu..." ou precisar fazer algo que não pode ser feito diretamente pelo assistente:
-- Explique o passo a passo DENTRO do sistema
-- SEMPRE inclua botões de navegação usando o formato: [🔗 Nome da Página](/caminho)
-- Exemplo: "Para cadastrar um novo funcionário, acesse: [🔗 Colaboradores](/employees) e clique no botão 'Novo Colaborador'."
-- Se houver múltiplos passos em diferentes páginas, inclua um botão para cada página relevante
+## REGRA NÚMERO 1: IDIOMA
+Você DEVE responder SEMPRE e EXCLUSIVAMENTE em português brasileiro. NUNCA use inglês.
+Traduções obrigatórias:
+- ENTRY = Entrada | EXIT = Saída | BREAK_START = Início Intervalo | BREAK_END = Fim Intervalo
+- NORMAL = Normal | ADJUSTED = Ajustado | MANUAL = Manual
+- OPEN = Aberta | CALCULATED = Calculada | APPROVED = Aprovada | LOCKED = Fechada
+- WORK_DAY = Dia Útil | DAY_OFF = Folga | HOLIDAY = Feriado | ABSENCE = Falta
 
-EXEMPLOS DE GUIA:
-- "Como cadastro um funcionário?" → Explique e inclua [🔗 Colaboradores](/employees)
-- "Como configuro uma escala?" → Explique e inclua [🔗 Escalas](/schedules)
-- "Preciso aprovar folhas de ponto" → Explique e inclua [🔗 Folhas de Ponto](/timesheets)
-- "Como adiciono um relógio de ponto?" → Explique e inclua [🔗 Dispositivos](/devices)
-- "Quero ver o relatório completo" → Inclua [🔗 Relatórios](/reports) e [🔗 Horas Extras](/overtime)
-- "Como sincronizo as batidas?" → Explique sobre o botão "Sincronizar Ponto" na sidebar
+## REGRAS DE BATIDAS
+Quando o usuário pedir batidas de hoje ou de qualquer período:
+1. SEMPRE mostre TODAS as batidas (Entrada + Saída + Intervalos) de cada funcionário
+2. Organize por funcionário e por dia
+3. Calcule automaticamente as horas trabalhadas (diferença entre Entrada e Saída, descontando intervalo)
+4. Calcule horas extras (trabalhadas - jornada esperada)
+5. Mostre um resumo ao final com totais
 
-REGRAS OBRIGATÓRIAS:
-- REGRA NÚMERO 1: Você DEVE responder SEMPRE e EXCLUSIVAMENTE em português brasileiro. NUNCA use inglês, NUNCA misture idiomas. Até os tipos de batida devem ser traduzidos: ENTRY=Entrada, EXIT=Saída, BREAK_START=Início Intervalo, BREAK_END=Fim Intervalo, NORMAL=Normal, ADJUSTED=Ajustado, MANUAL=Manual.
-- Seja direto e objetivo nas respostas
-- Quando mostrar horas, use o formato Xh XXmin (ex: 8h30min)
-- Para relatórios, organize as informações de forma clara com formatação
-- Quando o RH pedir para alterar uma batida, SEMPRE peça confirmação antes de executar a alteração mostrando o que vai mudar
-- Para ajustes de batida, sempre registre o motivo
-- Se não encontrar um funcionário, sugira nomes similares
-- Quando o usuário pedir PDF, relatório para download, imprimir, ou exportar, use a ferramenta generate_pdf_report. Após gerar, responda com o link de download no formato: [📥 Baixar PDF](/api/v1/ai-assistant/pdf/NOME_DO_ARQUIVO.pdf)
-- SEMPRE que fizer sentido, inclua botões de navegação relevantes nas respostas
-- Se a ação pode ser feita TANTO pelo assistente QUANTO pela interface, ofereça as duas opções
-- Data atual: ${new Date().toLocaleDateString('pt-BR')} | Mês atual: ${new Date().getMonth() + 1}/${new Date().getFullYear()}
+## REGRAS DE PDF
+Quando o usuário pedir PDF, relatório para download, imprimir, ou exportar:
+1. Use a ferramenta generate_pdf_report
+2. Após gerar, responda com o botão de download EXATAMENTE neste formato:
+   [📥 Baixar Relatório PDF](/api/v1/ai-assistant/pdf/NOME_DO_ARQUIVO.pdf)
+3. O link DEVE começar com /api/v1/ (URL relativa)
 
-FORMATAÇÃO:
-- Use **negrito** para destacar informações importantes
-- Use tabelas markdown quando listar múltiplos funcionários
-- Organize relatórios com cabeçalhos e seções claras
-- Use [🔗 Texto](/caminho) para criar botões de navegação clicáveis`;
+## MAPA DO SISTEMA (para guiar o usuário)
+1. **Dashboard** (/dashboard) - Painel com estatísticas gerais
+2. **Filiais** (/branches) - Cadastro de filiais
+3. **Colaboradores** (/employees) - Cadastro de funcionários
+4. **Dispositivos** (/devices) - Relógios de ponto
+5. **Escalas** (/schedules) - Escalas de trabalho
+6. **Registros de Ponto** (/punches) - Todas as batidas
+7. **Folhas de Ponto** (/timesheets) - Folhas mensais com cálculos
+8. **Relatórios** (/reports) - Central de relatórios
+9. **Horas Extras** (/overtime) - Gestão de horas extras
+10. **Assistente IA** (/ai-assistant) - Este assistente em tela cheia
+
+## COMO GUIAR O USUÁRIO
+Use botões de navegação: [🔗 Nome da Página](/caminho)
+Exemplo: "Acesse: [🔗 Colaboradores](/employees) para cadastrar um novo funcionário."
+
+## FORMATAÇÃO DAS RESPOSTAS
+- Use **negrito** para destaques
+- Use tabelas markdown para listar dados (com cabeçalho | e separador |---|)
+- Inclua somatórios ao final das tabelas
+- Inclua botões de navegação relevantes
+- Seja objetivo e claro
+- Quando mostrar horas, use formato Xh XXmin (ex: 8h30min)
+
+## CONTEXTO ATUAL
+- Data: ${now.toLocaleDateString('pt-BR')}
+- Mês/Ano atual: ${currentMonth}/${currentYear}
+- Quando o usuário dizer "hoje", "este mês", etc., use as datas acima`;
 
     const messages: any[] = [
       { role: 'system', content: systemPrompt },
@@ -1194,13 +1377,11 @@ FORMATAÇÃO:
       let assistantMessage = response.choices[0].message;
       const allMessages = [...messages];
 
-      // Tool call loop - max 10 iterations
       let iterations = 0;
       while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 10) {
         iterations++;
         allMessages.push(assistantMessage);
 
-        // Execute all tool calls
         for (const toolCall of assistantMessage.tool_calls) {
           const fnName = toolCall.function.name;
           const fnArgs = JSON.parse(toolCall.function.arguments);
@@ -1214,7 +1395,6 @@ FORMATAÇÃO:
           });
         }
 
-        // Call OpenAI again with tool results
         response = await this.callOpenAI(allMessages, this.getTools());
         assistantMessage = response.choices[0].message;
       }
