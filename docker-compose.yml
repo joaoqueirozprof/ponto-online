@@ -37,8 +37,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        CACHEBUST: "68"
-    image: ponto-api:v68
+        CACHEBUST: "69"
+    image: ponto-api:v69
     container_name: ponto-api
     restart: always
     ports:
@@ -110,8 +110,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        CACHEBUST: "33"
-    image: ponto-web:v33
+        CACHEBUST: "34"
+    image: ponto-web:v34
     container_name: ponto-web
     restart: always
     ports:

@@ -5,6 +5,8 @@ import { apiClient } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://72.61.129.78:4010/api/v1';
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -82,29 +84,40 @@ export default function AiAssistantPage() {
   };
 
   const formatContent = (content: string) => {
-    // Convert markdown to HTML-safe rendering
-    let html = content
+    // Resolve PDF links to full API URL
+    let processed = content.replace(/\(\/api\/v1\//g, `(${API_BASE.replace(/\/api\/v1$/, '')}/api/v1/`);
+    let html = processed
       // Bold
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // Headers
-      .replace(/^### (.+)$/gm, '<h4 class="text-sm font-bold mt-3 mb-1">$1</h4>')
-      .replace(/^## (.+)$/gm, '<h3 class="text-base font-bold mt-3 mb-1">$1</h3>')
-      .replace(/^# (.+)$/gm, '<h2 class="text-lg font-bold mt-3 mb-2">$1</h2>')
-      // Tables
-      .replace(/\|(.+)\|/g, (match) => {
-        const cells = match.split('|').filter(c => c.trim());
-        if (cells.every(c => /^[\s-:]+$/.test(c))) return '<tr class="border-b border-slate-200"></tr>';
-        const tag = cells.some(c => /^[\s-:]+$/.test(c)) ? 'td' : 'td';
-        return `<tr>${cells.map(c => `<${tag} class="px-2 py-1 text-xs border-r border-slate-100 last:border-r-0">${c.trim()}</${tag}>`).join('')}</tr>`;
+      .replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-900">$1</strong>')
+      // Headers with color
+      .replace(/^### (.+)$/gm, '<h4 class="text-sm font-bold mt-3 mb-1 text-indigo-700 border-b border-indigo-100 pb-1">$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3 class="text-base font-bold mt-3 mb-1 text-indigo-800">$1</h3>')
+      .replace(/^# (.+)$/gm, '<h2 class="text-lg font-bold mt-3 mb-2 text-indigo-900">$1</h2>')
+      // PDF download links: [📥 Text](url)
+      .replace(/\[📥\s*(.+?)\]\((\/.+?)\)/g,
+        '<a href="$2" target="_blank" class="inline-flex items-center gap-2 px-4 py-2 my-2 text-sm font-semibold text-white bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 rounded-lg shadow-md hover:shadow-lg transition-all no-underline"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>$1</a>')
+      // Navigation buttons: [🔗 Text](/path)
+      .replace(/\[🔗\s*(.+?)\]\((\/.+?)\)/g,
+        '<a href="$2" class="inline-flex items-center gap-1.5 px-3 py-1.5 my-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors no-underline"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>$1</a>')
+      // Tables with color
+      .replace(/\|(.+)\|/g, (match, _, offset) => {
+        const cells = match.split('|').filter((c: string) => c.trim());
+        if (cells.every((c: string) => /^[\s-:]+$/.test(c))) return '<!--table-sep-->';
+        // Check if this is likely a header row (first row before separator)
+        const isAfterSep = content.substring(0, content.indexOf(match)).includes('|---');
+        if (!isAfterSep && content.indexOf(match) < content.indexOf('|---')) {
+          return `<tr class="bg-indigo-600">${cells.map((c: string) => `<th class="px-3 py-2 text-xs font-semibold text-white text-left">${c.trim()}</th>`).join('')}</tr>`;
+        }
+        return `<tr class="hover:bg-indigo-50/50 transition-colors">${cells.map((c: string) => `<td class="px-3 py-1.5 text-xs border-t border-slate-100">${c.trim()}</td>`).join('')}</tr>`;
       })
-      // Line breaks
+      .replace(/<!--table-sep-->/g, '')
       .replace(/\n/g, '<br/>');
 
     // Wrap table rows
-    if (html.includes('<tr>')) {
-      html = html.replace(/(<tr>.*?<\/tr>(<br\/>)?)+/g, (match) => {
+    if (html.includes('<tr>') || html.includes('<tr ')) {
+      html = html.replace(/((<tr[ >].*?<\/tr>)(<br\/>)?)+/g, (match) => {
         const cleaned = match.replace(/<br\/>/g, '');
-        return `<table class="w-full border border-slate-200 rounded text-xs my-2">${cleaned}</table>`;
+        return `<div class="overflow-x-auto my-3 rounded-lg border border-slate-200 shadow-sm"><table class="w-full">${cleaned}</table></div>`;
       });
     }
 

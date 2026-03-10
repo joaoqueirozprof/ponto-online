@@ -4,6 +4,7 @@ import { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 import Sidebar from './Sidebar';
+import FloatingAiChat from './FloatingAiChat';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -40,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+      <FloatingAiChat />
     </div>
   );
 }
