@@ -212,6 +212,16 @@ export class AutoSyncService {
       const afdText = await this.controlId.exportAfd(deviceId, initialDate, initialNsr);
       records = this.controlId.parseAfdRecords(afdText);
       this.logger.log(`Parsed ${records.length} AFD records from device ${device.name}`);
+
+      // If AFD returned 0 new records, also try access_logs as supplemental source.
+      // Some devices (e.g. iDClass) store current punches in access_logs but keep
+      // only old/legacy data in AFD format.
+      if (records.length === 0) {
+        this.logger.log(
+          `AFD returned 0 new records for device ${device.name} — checking access_logs as supplemental source`,
+        );
+        useAccessLogs = true;
+      }
     } catch (afdError: any) {
       if (
         afdError.message?.includes('400') ||
@@ -222,7 +232,15 @@ export class AutoSyncService {
           `Device ${device.name} does not support export_afd.fcgi — using access_logs fallback`,
         );
         useAccessLogs = true;
+        records = [];
+      } else {
+        throw afdError;
+      }
+    }
 
+    // Fetch access_logs when AFD is empty or unsupported
+    if (useAccessLogs) {
+      try {
         // Load device users to map user_id → registration (PIS)
         const deviceUsers = await this.controlId.loadUsers(deviceId);
         const userIdToReg: Record<number, string> = {};
@@ -274,8 +292,14 @@ export class AutoSyncService {
         this.logger.log(
           `Converted ${records.length} access_logs to punch records for device ${device.name}`,
         );
-      } else {
-        throw afdError;
+      } catch (accessError: any) {
+        this.logger.error(
+          `Failed to fetch access_logs from device ${device.name}: ${accessError.message}`,
+        );
+        // If access_logs also fails and we have no AFD records, records stays empty
+        if (records.length === 0) {
+          records = [];
+        }
       }
     }
 
