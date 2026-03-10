@@ -11,6 +11,29 @@ interface SimpleEmployee {
   position: string;
 }
 
+interface DayDetail {
+  date: string;
+  dayOfWeek: number;
+  status: string;
+  workedMinutes: number;
+  expectedMinutes: number;
+  overtimeMinutes: number;
+  lateMinutes: number;
+  absenceMinutes: number;
+  punchCount: number;
+  punches: { time: string; type: string }[];
+}
+
+interface AdjustmentData {
+  id?: string;
+  field: string;
+  originalMinutes: number;
+  adjustedMinutes: number;
+  reason: string;
+  adjustedBy?: string;
+  createdAt?: string;
+}
+
 interface OvertimeEmployee {
   employee: {
     id: string;
@@ -36,6 +59,12 @@ interface OvertimeEmployee {
   daysWorked: number;
   daysAbsent: number;
   daysIncomplete: number;
+  dayDetails?: DayDetail[];
+  adjustments?: Record<string, AdjustmentData>;
+  adjustedOvertimeMinutes?: number;
+  adjustedAbsenceMinutes?: number;
+  adjustedLateMinutes?: number;
+  adjustedNetOvertimeMinutes?: number;
 }
 
 const fmtHHMM = (m: number): string => {
@@ -44,6 +73,56 @@ const fmtHHMM = (m: number): string => {
   const abs = Math.abs(m);
   return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
 };
+
+const fmtBrtTime = (iso: string): string => {
+  const d = new Date(iso);
+  const brt = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+  return `${String(brt.getUTCHours()).padStart(2, '0')}:${String(brt.getUTCMinutes()).padStart(2, '0')}`;
+};
+
+const punchLabel = (type: string) => {
+  switch (type) {
+    case 'ENTRY': return 'Entrada';
+    case 'EXIT': return 'Saída';
+    case 'BREAK_START': return 'Início Intervalo';
+    case 'BREAK_END': return 'Fim Intervalo';
+    default: return type;
+  }
+};
+
+const punchColor = (type: string) => {
+  switch (type) {
+    case 'ENTRY': return 'text-emerald-600 bg-emerald-50';
+    case 'EXIT': return 'text-red-600 bg-red-50';
+    case 'BREAK_START': return 'text-amber-600 bg-amber-50';
+    case 'BREAK_END': return 'text-blue-600 bg-blue-50';
+    default: return 'text-slate-600 bg-slate-50';
+  }
+};
+
+const dayStatusLabel = (s: string) => {
+  switch (s) {
+    case 'NORMAL': return 'Normal';
+    case 'HOLIDAY': return 'Feriado';
+    case 'WEEKEND': return 'Fim de Semana';
+    case 'ABSENCE': return 'Falta';
+    case 'INCOMPLETE': return 'Incompleto';
+    default: return s;
+  }
+};
+
+const dayStatusColor = (s: string) => {
+  switch (s) {
+    case 'NORMAL': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'HOLIDAY': return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'WEEKEND': return 'bg-slate-50 text-slate-600 border-slate-200';
+    case 'ABSENCE': return 'bg-red-50 text-red-700 border-red-200';
+    case 'INCOMPLETE': return 'bg-amber-50 text-amber-700 border-amber-200';
+    default: return 'bg-slate-50 text-slate-600 border-slate-200';
+  }
+};
+
+const DOW_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 const MONTHS = [
   { value: '1', label: 'Janeiro' }, { value: '2', label: 'Fevereiro' },
@@ -54,6 +133,391 @@ const MONTHS = [
   { value: '11', label: 'Novembro' }, { value: '12', label: 'Dezembro' },
 ];
 
+// ─── Punch Detail Modal ───
+function PunchDetailModal({
+  emp,
+  month,
+  year,
+  onClose,
+  onAdjustmentSaved,
+}: {
+  emp: OvertimeEmployee;
+  month: string;
+  year: string;
+  onClose: () => void;
+  onAdjustmentSaved: () => void;
+}) {
+  const [dayFilter, setDayFilter] = useState<'all' | 'overtime' | 'absence'>('all');
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editMinutes, setEditMinutes] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+  const [adjustments, setAdjustments] = useState<AdjustmentData[]>([]);
+  const [loadingAdj, setLoadingAdj] = useState(true);
+
+  const days = emp.dayDetails || [];
+
+  // Load adjustments
+  useEffect(() => {
+    setLoadingAdj(true);
+    apiClient.get(`/reports/overtime-adjustments/${emp.employee.id}/${month}/${year}`)
+      .then(r => {
+        setAdjustments(r.data || []);
+      })
+      .catch(() => setAdjustments([]))
+      .finally(() => setLoadingAdj(false));
+  }, [emp.employee.id, month, year]);
+
+  const filteredDays = days.filter(d => {
+    if (dayFilter === 'overtime') return d.overtimeMinutes > 0;
+    if (dayFilter === 'absence') return d.absenceMinutes > 0 || d.lateMinutes > 0 || d.status === 'ABSENCE';
+    return true;
+  });
+
+  const startEdit = (field: string, currentMinutes: number) => {
+    setEditingField(field);
+    setEditMinutes(String(currentMinutes));
+    setEditReason('');
+    setSavedMsg('');
+  };
+
+  const cancelEdit = () => {
+    setEditingField(null);
+    setEditMinutes('');
+    setEditReason('');
+  };
+
+  const saveAdjustment = async () => {
+    if (!editingField || !editReason.trim()) return;
+    setSaving(true);
+    try {
+      const originalMap: Record<string, number> = {
+        overtime: emp.overtimeMinutes,
+        absence: emp.absenceMinutes,
+        late: emp.lateMinutes,
+      };
+      await apiClient.post('/reports/overtime-adjustment', {
+        employeeId: emp.employee.id,
+        month: Number(month),
+        year: Number(year),
+        field: editingField,
+        originalMinutes: originalMap[editingField] || 0,
+        adjustedMinutes: Number(editMinutes),
+        reason: editReason.trim(),
+      });
+      setSavedMsg(`Ajuste de ${editingField === 'overtime' ? 'horas extras' : editingField === 'absence' ? 'faltas' : 'atrasos'} salvo!`);
+      // Reload adjustments
+      const r = await apiClient.get(`/reports/overtime-adjustments/${emp.employee.id}/${month}/${year}`);
+      setAdjustments(r.data || []);
+      setEditingField(null);
+      setEditMinutes('');
+      setEditReason('');
+      setTimeout(() => setSavedMsg(''), 3000);
+      onAdjustmentSaved();
+    } catch (err: any) {
+      setSavedMsg(`Erro: ${err?.response?.data?.message || err?.message || 'Falha'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteAdjustment = async (adjId: string) => {
+    if (!confirm('Excluir este ajuste?')) return;
+    try {
+      await apiClient.delete(`/reports/overtime-adjustment/${adjId}`);
+      const r = await apiClient.get(`/reports/overtime-adjustments/${emp.employee.id}/${month}/${year}`);
+      setAdjustments(r.data || []);
+      onAdjustmentSaved();
+    } catch {
+      alert('Erro ao excluir ajuste');
+    }
+  };
+
+  const adjFieldLabel = (f: string) => f === 'overtime' ? 'Horas Extras' : f === 'absence' ? 'Faltas' : f === 'late' ? 'Atrasos' : f;
+
+  // Totals for the filtered view
+  const totalOT = filteredDays.reduce((s, d) => s + d.overtimeMinutes, 0);
+  const totalAbs = filteredDays.reduce((s, d) => s + d.absenceMinutes, 0);
+  const totalLate = filteredDays.reduce((s, d) => s + d.lateMinutes, 0);
+  const totalWorked = filteredDays.reduce((s, d) => s + d.workedMinutes, 0);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 my-4">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">{emp.employee.name}</h2>
+            <p className="text-sm text-slate-500">{emp.employee.position || 'Sem cargo'} — CPF: {emp.employee.cpf}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Summary row */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200">
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Trabalhadas</p>
+            <p className="text-lg font-bold font-mono text-slate-900">{fmtHHMM(emp.workedMinutes)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-wide text-emerald-600">H.E. Brutas</p>
+            <p className="text-lg font-bold font-mono text-emerald-700">{fmtHHMM(emp.overtimeMinutes)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-wide text-red-500">Faltas</p>
+            <p className="text-lg font-bold font-mono text-red-600">{fmtHHMM(emp.absenceMinutes)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-wide text-amber-600">H.E. Líquidas</p>
+            <p className="text-lg font-bold font-mono text-amber-700">{fmtHHMM(emp.netOvertimeMinutes)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Atrasos</p>
+            <p className="text-lg font-bold font-mono text-slate-700">{fmtHHMM(emp.lateMinutes)}</p>
+          </div>
+        </div>
+
+        {/* HR Adjustment section */}
+        <div className="px-6 py-4 border-b border-slate-200 bg-indigo-50/50">
+          <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            Ajustes do RH
+          </h3>
+
+          {/* Existing adjustments */}
+          {loadingAdj ? (
+            <p className="text-xs text-slate-400">Carregando ajustes...</p>
+          ) : adjustments.length > 0 ? (
+            <div className="space-y-2 mb-3">
+              {adjustments.map(adj => (
+                <div key={adj.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-indigo-100">
+                  <span className="text-xs font-semibold text-indigo-700 w-24">{adjFieldLabel(adj.field)}</span>
+                  <span className="text-xs text-slate-500">
+                    <span className="line-through">{fmtHHMM(adj.originalMinutes)}</span>
+                    {' → '}
+                    <span className="font-bold text-indigo-700">{fmtHHMM(adj.adjustedMinutes)}</span>
+                  </span>
+                  <span className="text-xs text-slate-600 flex-1 italic">&ldquo;{adj.reason}&rdquo;</span>
+                  <span className="text-[10px] text-slate-400">{adj.adjustedBy || 'RH'}</span>
+                  <button
+                    onClick={() => deleteAdjustment(adj.id!)}
+                    className="text-red-400 hover:text-red-600 p-1"
+                    title="Excluir ajuste"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 mb-3">Nenhum ajuste registrado para este mês.</p>
+          )}
+
+          {/* Edit buttons */}
+          {!editingField ? (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => startEdit('overtime', emp.overtimeMinutes)} className="px-3 py-1.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-colors">
+                Ajustar Horas Extras ({fmtHHMM(emp.overtimeMinutes)})
+              </button>
+              <button onClick={() => startEdit('absence', emp.absenceMinutes)} className="px-3 py-1.5 text-xs font-medium bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors">
+                Ajustar Faltas ({fmtHHMM(emp.absenceMinutes)})
+              </button>
+              <button onClick={() => startEdit('late', emp.lateMinutes)} className="px-3 py-1.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">
+                Ajustar Atrasos ({fmtHHMM(emp.lateMinutes)})
+              </button>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg p-4 border border-indigo-200">
+              <p className="text-sm font-semibold text-indigo-900 mb-2">
+                Ajustando: {editingField === 'overtime' ? 'Horas Extras' : editingField === 'absence' ? 'Faltas' : 'Atrasos'}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Valor Original (min)</label>
+                  <input type="text" readOnly value={editingField === 'overtime' ? emp.overtimeMinutes : editingField === 'absence' ? emp.absenceMinutes : emp.lateMinutes} className="w-full h-8 px-3 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-400" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Novo Valor (min)</label>
+                  <input
+                    type="number"
+                    value={editMinutes}
+                    onChange={e => setEditMinutes(e.target.value)}
+                    className="w-full h-8 px-3 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    placeholder="Ex: 120"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Novo em HH:MM</label>
+                  <p className="h-8 flex items-center text-sm font-mono font-bold text-indigo-700">{fmtHHMM(Number(editMinutes) || 0)}</p>
+                </div>
+              </div>
+              <div className="mb-3">
+                <label className="block text-xs text-slate-500 mb-1">Motivo / Observação (obrigatório)</label>
+                <textarea
+                  value={editReason}
+                  onChange={e => setEditReason(e.target.value)}
+                  placeholder="Descreva o motivo do ajuste..."
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={saveAdjustment}
+                  disabled={saving || !editReason.trim()}
+                  className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Salvando...' : 'Salvar Ajuste'}
+                </button>
+                <button onClick={cancelEdit} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {savedMsg && (
+            <p className={`text-xs mt-2 ${savedMsg.startsWith('Erro') ? 'text-red-600' : 'text-emerald-600'} font-medium`}>{savedMsg}</p>
+          )}
+        </div>
+
+        {/* Day filter tabs */}
+        <div className="px-6 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="text-xs text-slate-500 font-medium mr-2">Visualizar:</span>
+          {[
+            { v: 'all', l: 'Todos os Dias', c: days.length },
+            { v: 'overtime', l: 'Só Horas Extras', c: days.filter(d => d.overtimeMinutes > 0).length },
+            { v: 'absence', l: 'Só Faltas/Atrasos', c: days.filter(d => d.absenceMinutes > 0 || d.lateMinutes > 0 || d.status === 'ABSENCE').length },
+          ].map(tab => (
+            <button
+              key={tab.v}
+              onClick={() => setDayFilter(tab.v as typeof dayFilter)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                dayFilter === tab.v
+                  ? 'bg-indigo-500 text-white border-indigo-500'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              {tab.l} ({tab.c})
+            </button>
+          ))}
+        </div>
+
+        {/* Filtered summary */}
+        {dayFilter !== 'all' && (
+          <div className="px-6 py-2 bg-indigo-50 border-b border-slate-200 text-xs text-indigo-700 flex gap-4">
+            <span>Dias: <strong>{filteredDays.length}</strong></span>
+            <span>Trabalhadas: <strong className="font-mono">{fmtHHMM(totalWorked)}</strong></span>
+            {dayFilter === 'overtime' && <span>H. Extras: <strong className="font-mono text-emerald-700">{fmtHHMM(totalOT)}</strong></span>}
+            {dayFilter === 'absence' && (
+              <>
+                <span>Faltas: <strong className="font-mono text-red-600">{fmtHHMM(totalAbs)}</strong></span>
+                <span>Atrasos: <strong className="font-mono text-amber-600">{fmtHHMM(totalLate)}</strong></span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Days table */}
+        <div className="max-h-[50vh] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white z-10">
+              <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-4 py-2">Data</th>
+                <th className="text-left px-4 py-2">Dia</th>
+                <th className="text-center px-4 py-2">Status</th>
+                <th className="text-left px-4 py-2">Batidas</th>
+                <th className="text-right px-4 py-2">Trabalhadas</th>
+                <th className="text-right px-4 py-2">Previstas</th>
+                <th className="text-right px-4 py-2 text-emerald-600">H. Extra</th>
+                <th className="text-right px-4 py-2 text-red-500">Falta</th>
+                <th className="text-right px-4 py-2 text-amber-600">Atraso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filteredDays.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="text-center py-8 text-slate-400">
+                    Nenhum dia encontrado com o filtro selecionado.
+                  </td>
+                </tr>
+              ) : (
+                filteredDays.map(day => (
+                  <tr key={day.date} className={`hover:bg-slate-50 ${day.status === 'ABSENCE' ? 'bg-red-50/30' : day.status === 'WEEKEND' || day.status === 'HOLIDAY' ? 'bg-slate-50/50' : ''}`}>
+                    <td className="px-4 py-2 font-mono text-slate-700">{day.date.split('-').reverse().join('/')}</td>
+                    <td className="px-4 py-2 text-slate-600">{DOW_NAMES[day.dayOfWeek]}</td>
+                    <td className="px-4 py-2 text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full border ${dayStatusColor(day.status)}`}>
+                        {dayStatusLabel(day.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {day.punches.length === 0 ? (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        ) : (
+                          day.punches.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()).map((p, i) => (
+                            <span key={i} className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded ${punchColor(p.type)}`}>
+                              {fmtBrtTime(p.time)} {punchLabel(p.type)}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-700">{fmtHHMM(day.workedMinutes)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-400">{fmtHHMM(day.expectedMinutes)}</td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {day.overtimeMinutes > 0 ? (
+                        <span className="text-emerald-600 font-semibold">{fmtHHMM(day.overtimeMinutes)}</span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {day.absenceMinutes > 0 ? (
+                        <span className="text-red-600 font-semibold">{fmtHHMM(day.absenceMinutes)}</span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {day.lateMinutes > 0 ? (
+                        <span className="text-amber-600 font-semibold">{fmtHHMM(day.lateMinutes)}</span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between rounded-b-2xl">
+          <p className="text-xs text-slate-400">
+            {filteredDays.length} dias exibidos · Total trabalhado: {fmtHHMM(totalWorked)}
+          </p>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ───
 export default function OvertimePage() {
   const now = new Date();
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -70,6 +534,7 @@ export default function OvertimePage() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [toast, setToast] = useState('');
   const [errorDetail, setErrorDetail] = useState('');
+  const [modalEmp, setModalEmp] = useState<OvertimeEmployee | null>(null);
 
   // Load branches
   useEffect(() => {
@@ -77,13 +542,9 @@ export default function OvertimePage() {
       .then(r => {
         const list: Branch[] = r.data.data || r.data || [];
         setBranches(list);
-        // Prefer "Atacado" branch as default
         const atacado = list.find(b => b.name?.toLowerCase().includes('atacado'));
-        if (atacado) {
-          setSelectedBranch(atacado.id);
-        } else if (list.length > 0) {
-          setSelectedBranch(list[0].id);
-        }
+        if (atacado) setSelectedBranch(atacado.id);
+        else if (list.length > 0) setSelectedBranch(list[0].id);
       })
       .catch(() => {});
   }, []);
@@ -95,30 +556,13 @@ export default function OvertimePage() {
     apiClient.get('/employees', { params: { take: 100, skip: 0 } })
       .then(r => {
         const allEmps = r.data.data || r.data || [];
-        // Filter by branch on client side (API may not support branchId filter)
         const branchEmps = allEmps
           .filter((e: any) => e.branchId === selectedBranch && e.isActive !== false)
-          .map((e: any) => ({
-            id: e.id,
-            name: e.name || '',
-            position: e.position || '',
-          }))
+          .map((e: any) => ({ id: e.id, name: e.name || '', position: e.position || '' }))
           .sort((a: SimpleEmployee, b: SimpleEmployee) => a.name.localeCompare(b.name));
         setEmployees(branchEmps);
       })
-      .catch(() => {
-        // Fallback: try fetching more
-        apiClient.get('/employees', { params: { take: 200, skip: 0 } })
-          .then(r2 => {
-            const allEmps = r2.data.data || r2.data || [];
-            const branchEmps = allEmps
-              .filter((e: any) => e.branchId === selectedBranch && e.isActive !== false)
-              .map((e: any) => ({ id: e.id, name: e.name || '', position: e.position || '' }))
-              .sort((a: SimpleEmployee, b: SimpleEmployee) => a.name.localeCompare(b.name));
-            setEmployees(branchEmps);
-          })
-          .catch(() => setEmployees([]));
-      });
+      .catch(() => setEmployees([]));
   }, [selectedBranch]);
 
   const fetchReport = useCallback(async () => {
@@ -179,6 +623,7 @@ export default function OvertimePage() {
 
     const rowsHtml = filtered.map((item, i) => {
       const netOT = item.netOvertimeMinutes || 0;
+      const hasAdj = item.adjustments && Object.keys(item.adjustments).length > 0;
       const otClass = netOT > 480 ? 'color:#dc2626;font-weight:700' :
         netOT > 240 ? 'color:#d97706;font-weight:700' :
         netOT > 0 ? 'color:#16a34a;font-weight:700' : 'color:#94a3b8';
@@ -187,20 +632,16 @@ export default function OvertimePage() {
         <tr style="${noPunchStyle}">
           <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#94a3b8;font-size:11px">${i + 1}</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">
-            <div style="font-weight:600;color:#0f172a;font-size:12px">${item.employee.name}</div>
+            <div style="font-weight:600;color:#0f172a;font-size:12px">${item.employee.name}${hasAdj ? ' *' : ''}</div>
             <div style="color:#94a3b8;font-size:10px">${item.employee.cpf}</div>
           </td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">
-            <div style="color:#475569;font-size:11px">${item.employee.position || '—'}</div>
-          </td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px">
-            ${item.hasPunches ? fmtHHMM(item.workedMinutes) : 'Sem ponto'}
-          </td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b">${fmtHHMM(item.expectedMinutes)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#94a3b8">${fmtHHMM(item.overtimeMinutes)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#475569;font-size:11px">${item.employee.position || '—'}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px">${item.hasPunches ? fmtHHMM(item.workedMinutes) : 'Sem ponto'}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#64748b">${fmtHHMM(item.expectedMinutes)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:#94a3b8">${fmtHHMM(item.overtimeMinutes)}</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.absenceMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.absenceMinutes)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass}">${fmtHHMM(netOT)}</td>
-          <td contenteditable="true" style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.lateMinutes)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;${otClass}">${fmtHHMM(netOT)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;color:${item.lateMinutes > 0 ? '#ef4444' : '#94a3b8'}">${fmtHHMM(item.lateMinutes)}</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#475569">${item.daysWorked}</td>
         </tr>`;
     }).join('');
@@ -223,8 +664,6 @@ export default function OvertimePage() {
         .card { flex: 1; min-width: 140px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
         .card .label { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
         .card .value { font-size: 18px; font-weight: 700; }
-        .deduction-note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 11px; color: #92400e; }
-        .deduction-note strong { color: #78350f; }
         table { width: 100%; border-collapse: collapse; }
         thead tr { background: #f8fafc; }
         th { padding: 8px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; border-bottom: 2px solid #e2e8f0; }
@@ -235,81 +674,37 @@ export default function OvertimePage() {
       </style>
     </head><body>
       <div class="header">
-        <div class="header-left">
-          <h1>Relatório de Horas Extras</h1>
-          <p>Gerado em ${new Date().toLocaleString('pt-BR')}</p>
-        </div>
-        <div class="header-right">
-          <div class="branch">${bName}</div>
-          <div class="period">${mLabel} / ${year}</div>
-        </div>
+        <div class="header-left"><h1>Relatório de Horas Extras</h1><p>Gerado em ${new Date().toLocaleString('pt-BR')}</p></div>
+        <div class="header-right"><div class="branch">${bName}</div><div class="period">${mLabel} / ${year}</div></div>
       </div>
-
       <div class="summary">
-        <div class="card">
-          <div class="label">Total Funcionários</div>
-          <div class="value" style="color:#1e293b">${data.length}</div>
-          <div style="font-size:10px;color:#94a3b8;margin-top:2px">${withPunches} com ponto · ${noPunch} sem ponto</div>
-        </div>
-        <div class="card" style="border-color:#86efac">
-          <div class="label" style="color:#16a34a">H. Extras Brutas</div>
-          <div class="value" style="color:#16a34a;font-family:monospace">${fmtHHMM(totalOTF)}</div>
-        </div>
-        <div class="card" style="border-color:#fecaca">
-          <div class="label" style="color:#dc2626">Faltas/Atrasos</div>
-          <div class="value" style="color:#dc2626;font-family:monospace">-${fmtHHMM(totalAbsenceF)}</div>
-        </div>
-        <div class="card" style="border-color:#fde68a">
-          <div class="label" style="color:#d97706">H. Extras Líquidas</div>
-          <div class="value" style="color:#d97706;font-family:monospace">${fmtHHMM(totalNetOTF)}</div>
-        </div>
+        <div class="card"><div class="label">Total Funcionários</div><div class="value" style="color:#1e293b">${data.length}</div></div>
+        <div class="card" style="border-color:#86efac"><div class="label" style="color:#16a34a">H. Extras Brutas</div><div class="value" style="color:#16a34a;font-family:monospace">${fmtHHMM(totalOTF)}</div></div>
+        <div class="card" style="border-color:#fecaca"><div class="label" style="color:#dc2626">Faltas/Atrasos</div><div class="value" style="color:#dc2626;font-family:monospace">-${fmtHHMM(totalAbsenceF)}</div></div>
+        <div class="card" style="border-color:#fde68a"><div class="label" style="color:#d97706">H. Extras Líquidas</div><div class="value" style="color:#d97706;font-family:monospace">${fmtHHMM(totalNetOTF)}</div></div>
       </div>
-
-      <div class="deduction-note">
-        <strong>Cálculo transparente:</strong> H. Extras Líquidas = H. Extras Brutas − Faltas/Atrasos.
-        Cada hora que o funcionário faltou ou chegou atrasado é descontada das horas extras acumuladas.
-        O valor líquido é o que efetivamente deve ser pago. Confira com as batidas individuais de cada funcionário.
-      </div>
-
       <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Colaborador</th>
-            <th>Cargo</th>
-            <th class="right">Trabalhadas</th>
-            <th class="right">Previstas</th>
-            <th class="right">H.E. Brutas</th>
-            <th class="right" style="color:#dc2626">Faltas</th>
-            <th class="right" style="color:#d97706">H.E. Líquidas</th>
-            <th class="right">Atrasos</th>
-            <th class="right">Dias</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>#</th><th>Colaborador</th><th>Cargo</th>
+          <th class="right">Trabalhadas</th><th class="right">Previstas</th>
+          <th class="right">H.E. Brutas</th><th class="right" style="color:#dc2626">Faltas</th>
+          <th class="right" style="color:#d97706">H.E. Líquidas</th>
+          <th class="right">Atrasos</th><th class="right">Dias</th>
+        </tr></thead>
         <tbody>${rowsHtml}</tbody>
-        ${filtered.length > 0 ? `<tfoot>
-          <tr>
-            <td colspan="3" style="padding:8px;color:#475569;font-size:11px">TOTAL — ${filtered.length} colaboradores</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#1e293b">${fmtHHMM(totalWorkedF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#64748b">${fmtHHMM(totalExpectedF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#16a34a">${fmtHHMM(totalOTF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#dc2626">-${fmtHHMM(totalAbsenceF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#d97706;font-weight:800">${fmtHHMM(totalNetOTF)}</td>
-            <td style="padding:8px;text-align:right;font-family:monospace;color:#ef4444">${fmtHHMM(totalLateF)}</td>
-            <td style="padding:8px;text-align:right;color:#475569">${totalDaysF}</td>
-          </tr>
-        </tfoot>` : ''}
+        ${filtered.length > 0 ? `<tfoot><tr>
+          <td colspan="3" style="padding:8px;color:#475569;font-size:11px">TOTAL — ${filtered.length} colaboradores</td>
+          <td style="padding:8px;text-align:right;font-family:monospace">${fmtHHMM(totalWorkedF)}</td>
+          <td style="padding:8px;text-align:right;font-family:monospace;color:#64748b">${fmtHHMM(totalExpectedF)}</td>
+          <td style="padding:8px;text-align:right;font-family:monospace;color:#16a34a">${fmtHHMM(totalOTF)}</td>
+          <td style="padding:8px;text-align:right;font-family:monospace;color:#dc2626">-${fmtHHMM(totalAbsenceF)}</td>
+          <td style="padding:8px;text-align:right;font-family:monospace;color:#d97706;font-weight:800">${fmtHHMM(totalNetOTF)}</td>
+          <td style="padding:8px;text-align:right;font-family:monospace;color:#ef4444">${fmtHHMM(totalLateF)}</td>
+          <td style="padding:8px;text-align:right;color:#475569">${totalDaysF}</td>
+        </tr></tfoot>` : ''}
       </table>
-
-      <div class="footer">Ponto Online — Relatório gerado automaticamente • ${bName} • ${mLabel}/${year}</div>
-
-      <script>
-        function imprimirRelatorio() {
-          document.getElementById('toolbar').style.display = 'none';
-          window.print();
-          document.getElementById('toolbar').style.display = 'flex';
-        }
-      </script>
+      <div class="footer">Ponto Online v70 — ${bName} — ${mLabel}/${year} · * = possui ajuste RH</div>
+      <script>function imprimirRelatorio(){document.getElementById('toolbar').style.display='none';window.print();document.getElementById('toolbar').style.display='flex';}</script>
       <div id="toolbar" style="position:fixed;top:0;left:0;right:0;background:#4f46e5;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
         <div style="display:flex;align-items:center;gap:12px">
           <span style="color:white;font-size:13px;font-weight:600">Pre-visualizacao do Relatorio</span>
@@ -346,6 +741,17 @@ export default function OvertimePage() {
 
   return (
     <div className="space-y-6 print:space-y-4">
+      {/* Modal */}
+      {modalEmp && (
+        <PunchDetailModal
+          emp={modalEmp}
+          month={month}
+          year={year}
+          onClose={() => setModalEmp(null)}
+          onAdjustmentSaved={() => fetchReport()}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between print:hidden">
         <div>
@@ -365,12 +771,6 @@ export default function OvertimePage() {
             </button>
           </div>
         )}
-      </div>
-
-      {/* Print header */}
-      <div className="hidden print:block">
-        <h1 className="text-xl font-bold">Relatório de Horas Extras — {branchName}</h1>
-        <p className="text-sm text-gray-600">{monthLabel}/{year}</p>
       </div>
 
       {/* Filters */}
@@ -427,7 +827,6 @@ export default function OvertimePage() {
           </div>
         </div>
 
-        {/* Employee filter - now populated independently */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Funcionário Individual</label>
@@ -438,17 +837,9 @@ export default function OvertimePage() {
             >
               <option value="">Todos os funcionários ({employees.length})</option>
               {employees.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.name} — {e.position || 'Sem cargo'}
-                </option>
+                <option key={e.id} value={e.id}>{e.name} — {e.position || 'Sem cargo'}</option>
               ))}
             </select>
-            {selectedEmployee && (
-              <p className="text-xs text-violet-600 mt-1 flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Relatório individual selecionado
-              </p>
-            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Buscar por nome</label>
@@ -464,10 +855,7 @@ export default function OvertimePage() {
                 className="w-full h-9 pl-10 pr-4 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               {searchEmployee && (
-                <button
-                  onClick={() => setSearchEmployee('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
+                <button onClick={() => setSearchEmployee('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -520,9 +908,7 @@ export default function OvertimePage() {
           )}
         </button>
 
-        {errorDetail && (
-          <p className="text-xs text-red-500 mt-2">{errorDetail}</p>
-        )}
+        {errorDetail && <p className="text-xs text-red-500 mt-2">{errorDetail}</p>}
       </div>
 
       {/* Toast */}
@@ -532,9 +918,10 @@ export default function OvertimePage() {
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Results */}
       {fetched && (
         <>
+          {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <p className="text-xs text-slate-500 mb-1">Funcionários</p>
@@ -563,7 +950,7 @@ export default function OvertimePage() {
             </div>
           </div>
 
-          {/* Deduction explanation */}
+          {/* Explanation */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
             <p className="font-semibold mb-1">Cálculo Transparente de Horas Extras</p>
             <p className="text-amber-700">
@@ -574,7 +961,7 @@ export default function OvertimePage() {
               <span className="font-mono font-bold text-amber-700">{fmtHHMM(totalNetOT)}</span> (líquidas a pagar)
             </p>
             <p className="text-xs text-amber-600 mt-1">
-              Cada hora de falta ou atraso é descontada das horas extras. Confira com as batidas individuais de cada funcionário.
+              Clique em &quot;Conferir Batidas&quot; para ver todas as batidas do funcionário e editar valores com observações.
             </p>
           </div>
 
@@ -599,7 +986,7 @@ export default function OvertimePage() {
                     <th className="text-right px-4 py-3 text-xs font-semibold text-red-500 uppercase tracking-wide">Faltas</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-amber-600 uppercase tracking-wide">H.E. Líquidas</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Atrasos</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Dias</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-indigo-600 uppercase tracking-wide">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -613,6 +1000,7 @@ export default function OvertimePage() {
                     filtered.map((item, i) => {
                       const netOT = item.netOvertimeMinutes || 0;
                       const badge = getOTBadge(netOT);
+                      const hasAdj = item.adjustments && Object.keys(item.adjustments).length > 0;
                       return (
                         <tr
                           key={item.employee.id}
@@ -620,12 +1008,18 @@ export default function OvertimePage() {
                         >
                           <td className="px-4 py-3 text-slate-400 text-xs">{i + 1}</td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-slate-900 truncate max-w-[200px]">{item.employee.name}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-slate-900 truncate max-w-[180px]">{item.employee.name}</span>
+                              {hasAdj && (
+                                <span className="inline-flex items-center px-1 py-0.5 text-[9px] font-bold bg-indigo-100 text-indigo-700 rounded" title="Possui ajuste RH">
+                                  RH
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-slate-400">{item.employee.cpf}</div>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="text-slate-700 truncate max-w-[160px]">{item.employee.position || '—'}</div>
-                            <div className="text-xs text-slate-400">{item.employee.department || '—'}</div>
+                            <div className="text-slate-700 truncate max-w-[140px]">{item.employee.position || '—'}</div>
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
                             {item.hasPunches ? (
@@ -662,7 +1056,19 @@ export default function OvertimePage() {
                               <span className="text-red-500">{fmtHHMM(item.lateMinutes)}</span>
                             ) : '00:00'}
                           </td>
-                          <td className="px-4 py-3 text-right text-slate-600">{item.daysWorked}</td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              onClick={() => setModalEmp(item)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                              title="Ver batidas e ajustar"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                              Conferir
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
@@ -690,9 +1096,7 @@ export default function OvertimePage() {
                       <td className="px-4 py-3 text-right font-mono text-red-500">
                         {fmtHHMM(filtered.reduce((s, e) => s + e.lateMinutes, 0))}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-700">
-                        {filtered.reduce((s, e) => s + e.daysWorked, 0)}
-                      </td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 )}

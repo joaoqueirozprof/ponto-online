@@ -499,6 +499,20 @@ export class ReportsService {
     });
     const tsMap = new Map(storedTimesheets.map(t => [t.employeeId, t]));
 
+    // Load all existing HR adjustments for this branch/month
+    const allAdjustments = await this.prisma.overtimeAdjustment.findMany({
+      where: {
+        employee: { branchId },
+        month,
+        year,
+      },
+    });
+    const adjByEmployee: Record<string, Record<string, any>> = {};
+    for (const adj of allAdjustments) {
+      if (!adjByEmployee[adj.employeeId]) adjByEmployee[adj.employeeId] = {};
+      adjByEmployee[adj.employeeId][adj.field] = adj;
+    }
+
     const payrollData: any[] = [];
 
     for (const emp of employees) {
@@ -526,6 +540,13 @@ export class ReportsService {
         })),
       }));
 
+      // Apply HR adjustments if they exist
+      const empAdj = adjByEmployee[emp.id] || {};
+      const adjOvertime = empAdj['overtime']?.adjustedMinutes ?? calc.totalOvertimeMinutes;
+      const adjAbsence = empAdj['absence']?.adjustedMinutes ?? calc.totalAbsenceMinutes;
+      const adjLate = empAdj['late']?.adjustedMinutes ?? calc.totalLateMinutes;
+      const adjNetOvertime = Math.max(0, adjOvertime - adjAbsence);
+
       payrollData.push({
         employee: {
           id: emp.id,
@@ -541,7 +562,6 @@ export class ReportsService {
         expectedHours: (calc.totalExpectedMinutes / 60).toFixed(2),
         overtimeMinutes: calc.totalOvertimeMinutes,
         overtimeHours: (calc.totalOvertimeMinutes / 60).toFixed(2),
-        // NEW: Net overtime after deducting absences/late - transparent for RH
         netOvertimeMinutes,
         netOvertimeHours: (netOvertimeMinutes / 60).toFixed(2),
         nightMinutes: calc.totalNightMinutes,
@@ -554,8 +574,13 @@ export class ReportsService {
         daysWorked: calc.days.filter(d => d.workedMinutes > 0).length,
         daysAbsent: calc.days.filter(d => d.status === 'ABSENCE').length,
         daysIncomplete: calc.days.filter(d => d.status === 'INCOMPLETE').length,
-        // Per-day transparency
         dayDetails,
+        // HR Adjustments
+        adjustments: empAdj,
+        adjustedOvertimeMinutes: adjOvertime,
+        adjustedAbsenceMinutes: adjAbsence,
+        adjustedLateMinutes: adjLate,
+        adjustedNetOvertimeMinutes: adjNetOvertime,
       });
     }
 
@@ -565,8 +590,60 @@ export class ReportsService {
       year,
       totalProcessed: employees.length,
       payrollData,
-      _build: 'v69-brt-net-overtime',
+      _build: 'v70-adjustments',
     };
+  }
+
+  // ── HR Overtime Adjustment CRUD ──
+
+  async saveOvertimeAdjustment(data: {
+    employeeId: string;
+    month: number;
+    year: number;
+    field: string;
+    originalMinutes: number;
+    adjustedMinutes: number;
+    reason: string;
+    adjustedBy?: string;
+  }) {
+    const month = Number(data.month);
+    const year = Number(data.year);
+    return this.prisma.overtimeAdjustment.upsert({
+      where: {
+        employeeId_month_year_field: {
+          employeeId: data.employeeId,
+          month,
+          year,
+          field: data.field,
+        },
+      },
+      create: {
+        employeeId: data.employeeId,
+        month,
+        year,
+        field: data.field,
+        originalMinutes: data.originalMinutes,
+        adjustedMinutes: Number(data.adjustedMinutes),
+        reason: data.reason,
+        adjustedBy: data.adjustedBy || 'RH',
+      },
+      update: {
+        originalMinutes: data.originalMinutes,
+        adjustedMinutes: Number(data.adjustedMinutes),
+        reason: data.reason,
+        adjustedBy: data.adjustedBy || 'RH',
+      },
+    });
+  }
+
+  async getOvertimeAdjustments(employeeId: string, month: number, year: number) {
+    return this.prisma.overtimeAdjustment.findMany({
+      where: { employeeId, month: Number(month), year: Number(year) },
+    });
+  }
+
+  async deleteOvertimeAdjustment(id: string) {
+    return this.prisma.overtimeAdjustment.delete({ where: { id } });
   }
 
   /**

@@ -142,6 +142,7 @@ model Employee {
   timeBalances TimeBalance[]
   punchAdjustments PunchAdjustment[]
   calculationIssues CalculationIssue[]
+  overtimeAdjustments OvertimeAdjustment[]
 
   @@index([branchId])
   @@index([scheduleId])
@@ -485,6 +486,27 @@ enum IssueType {
   NO_BREAK
   SCHEDULE_CONFLICT
   OTHER
+}
+
+model OvertimeAdjustment {
+  id String @id @default(cuid())
+  employeeId String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  month Int
+  year Int
+  field String // 'overtime', 'absence', 'late'
+  originalMinutes Int
+  adjustedMinutes Int
+  reason String
+  adjustedBy String @default("RH")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, month, year, field])
+  @@index([employeeId])
+  @@map("overtime_adjustments")
 }
 
 model AuditLog {
