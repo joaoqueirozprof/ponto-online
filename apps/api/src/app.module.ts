@@ -17,6 +17,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { AutoSyncModule } from './modules/auto-sync/auto-sync.module';
+import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { AutoSyncModule } from './modules/auto-sync/auto-sync.module';
     ReportsModule,
     SeedModule,
     AutoSyncModule,
+    AiAssistantModule,
   ],
 })
 export class AppModule {}

@@ -37,8 +37,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        CACHEBUST: "67"
-    image: ponto-api:v67
+        CACHEBUST: "68"
+    image: ponto-api:v68
     container_name: ponto-api
     restart: always
     ports:
@@ -57,6 +57,7 @@ services:
       OPENSSL_CONF: "/app/openssl_legacy.cnf"
       NODE_OPTIONS: "--tls-min-v1.0"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      OPENAI_KEY_B64: "c2stcHJvai1JbnlFLWJuYzJjTktOWTdQc3pyRS1TUGJXa2JQcmRicGtVMGY5ZC1vcU9FRkllbWZiQ0UxbnpWNnBMYUVRQ2VXSnQ2U0d3dm0xWlQzQmxia0ZKY2h6cWxORG03cWF2aG95RUhUdzRrWEZIQUZPMUpSdFlFQkNCUkZJUEF1Y0s2VjJMWnRNQ2lySzVTUjUtLWc2R1ppeEd6UnV5QUE="
     depends_on:
       ponto-db:
         condition: service_healthy
@@ -109,8 +110,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        CACHEBUST: "32"
-    image: ponto-web:v32
+        CACHEBUST: "33"
+    image: ponto-web:v33
     container_name: ponto-web
     restart: always
     ports:
