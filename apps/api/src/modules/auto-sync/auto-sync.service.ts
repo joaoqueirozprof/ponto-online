@@ -370,13 +370,12 @@ export class AutoSyncService {
           },
         });
 
-        // Create normalized punch if employee found
+        // Create/re-normalize punches for this employee's BRT day
         if (employeeId) {
-          // Determine punch type based on existing punches for this BRT day
-          // BRT = UTC-3, so we use BRT day boundaries to correctly group punches
           const { dayStart, dayEnd } = getBrtDayBoundsUtc(punchTime);
 
-          const existingPunches = await this.prisma.normalizedPunch.findMany({
+          // Get ALL raw punch events for this employee on this BRT day
+          const dayRawPunches = await this.prisma.rawPunchEvent.findMany({
             where: {
               employeeId,
               punchTime: { gte: dayStart, lte: dayEnd },
@@ -384,20 +383,59 @@ export class AutoSyncService {
             orderBy: { punchTime: 'asc' },
           });
 
-          const punchIndex = existingPunches.length;
-          const punchTypes = ['ENTRY', 'BREAK_START', 'BREAK_END', 'EXIT'];
-          const punchType = punchTypes[punchIndex % 4] as any;
+          // Deduplicate: remove punches within 2 minutes of the previous one
+          const deduped: typeof dayRawPunches = [];
+          for (const rp of dayRawPunches) {
+            if (deduped.length === 0) {
+              deduped.push(rp);
+            } else {
+              const prev = deduped[deduped.length - 1];
+              const diffSec = (rp.punchTime.getTime() - prev.punchTime.getTime()) / 1000;
+              if (diffSec > 120) {
+                deduped.push(rp);
+              }
+            }
+          }
 
-          await this.prisma.normalizedPunch.create({
-            data: {
-              rawPunchEventId: rawPunch.id,
+          // Cap at 4 punches per day
+          const toNormalize = deduped.slice(0, 4);
+          const dayTotal = toNormalize.length;
+
+          // Smart punch type assignment based on total punches in the day:
+          // 1 punch: ENTRY
+          // 2 punches: ENTRY, EXIT
+          // 3 punches: ENTRY, BREAK_START, EXIT
+          // 4 punches: ENTRY, BREAK_START, BREAK_END, EXIT
+          const typeMap: Record<number, string[]> = {
+            1: ['ENTRY'],
+            2: ['ENTRY', 'EXIT'],
+            3: ['ENTRY', 'BREAK_START', 'EXIT'],
+            4: ['ENTRY', 'BREAK_START', 'BREAK_END', 'EXIT'],
+          };
+          const types = typeMap[dayTotal] || typeMap[4];
+
+          // Delete existing normalized punches for this day
+          await this.prisma.normalizedPunch.deleteMany({
+            where: {
               employeeId,
-              punchTime,
-              originalTime: punchTime,
-              punchType,
-              status: 'NORMAL',
+              punchTime: { gte: dayStart, lte: dayEnd },
             },
           });
+
+          // Re-create with smart types
+          for (let i = 0; i < toNormalize.length; i++) {
+            const rp = toNormalize[i];
+            await this.prisma.normalizedPunch.create({
+              data: {
+                rawPunchEventId: rp.id,
+                employeeId,
+                punchTime: rp.punchTime,
+                originalTime: rp.punchTime,
+                punchType: types[i] as any,
+                status: 'NORMAL',
+              },
+            });
+          }
 
           // Track affected employee/months for recalculation using BRT date
           const { month: brtMonth, year: brtYear } = getBrtMonthYear(punchTime);
