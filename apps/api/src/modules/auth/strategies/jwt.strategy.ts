@@ -26,10 +26,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             },
           },
         },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            isActive: true,
+            blockedAt: true,
+          },
+        },
       },
     });
 
     if (!user || !user.isActive) {
+      return null;
+    }
+
+    // Check if company is active (unless super admin)
+    if (user.company && (!user.company.isActive || user.company.blockedAt)) {
       return null;
     }
 
@@ -38,7 +51,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       name: user.name,
       roleId: user.role.id,
+      roleName: user.role.name,
+      companyId: user.companyId,
+      companyName: user.company?.name || null,
       branchId: user.branchId,
+      isSuperAdmin: user.isSuperAdmin,
       permissions: user.role.rolePermissions.map((rp) => rp.permission.code),
     };
   }

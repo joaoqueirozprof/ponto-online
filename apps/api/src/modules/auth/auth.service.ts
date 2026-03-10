@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -18,10 +18,10 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new BadRequestException('User with this email already exists');
+      throw new BadRequestException('Já existe um usuário com este email');
     }
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const hashedPassword = await bcrypt.hash(dto.password, 12);
 
     const user = await this.prisma.systemUser.create({
       data: {
@@ -30,31 +30,25 @@ export class AuthService {
         passwordHash: hashedPassword,
         roleId: dto.roleId,
         branchId: dto.branchId,
+        companyId: dto.companyId || null,
         isActive: true,
       },
       include: {
         role: {
           include: {
             rolePermissions: {
-              include: {
-                permission: true,
-              },
+              include: { permission: true },
             },
           },
         },
+        company: { select: { id: true, name: true } },
       },
     });
 
     const tokens = this.generateTokens(user);
 
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role.name,
-        permissions: user.role.rolePermissions.map((rp) => rp.permission.code),
-      },
+      user: this.formatUserResponse(user),
       ...tokens,
     };
   }
@@ -66,27 +60,38 @@ export class AuthService {
         role: {
           include: {
             rolePermissions: {
-              include: {
-                permission: true,
-              },
+              include: { permission: true },
             },
           },
         },
+        company: {
+          select: { id: true, name: true, isActive: true, blockedAt: true },
+        },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Credenciais inválidas');
     }
 
     const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
-
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Credenciais inválidas');
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('User account is disabled');
+      throw new UnauthorizedException('Conta de usuário desativada');
+    }
+
+    // Check company status (skip for super admins without company)
+    if (user.company) {
+      if (!user.company.isActive) {
+        throw new ForbiddenException('A empresa está inativa. Entre em contato com o suporte.');
+      }
+      if (user.company.blockedAt) {
+        throw new ForbiddenException('A empresa está bloqueada. Entre em contato com o suporte.');
+      }
     }
 
     await this.prisma.systemUser.update({
@@ -97,13 +102,7 @@ export class AuthService {
     const tokens = this.generateTokens(user);
 
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role.name,
-        permissions: user.role.rolePermissions.map((rp) => rp.permission.code),
-      },
+      user: this.formatUserResponse(user),
       ...tokens,
     };
   }
@@ -120,33 +119,27 @@ export class AuthService {
           role: {
             include: {
               rolePermissions: {
-                include: {
-                  permission: true,
-                },
+                include: { permission: true },
               },
             },
           },
+          company: { select: { id: true, name: true, isActive: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
       });
 
       if (!user || !user.isActive) {
-        throw new UnauthorizedException('User not found or inactive');
+        throw new UnauthorizedException('Usuário não encontrado ou inativo');
       }
 
       const tokens = this.generateTokens(user);
 
       return {
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role.name,
-          permissions: user.role.rolePermissions.map((rp) => rp.permission.code),
-        },
+        user: this.formatUserResponse(user),
         ...tokens,
       };
     } catch (error) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException('Token de refresh inválido');
     }
   }
 
@@ -157,18 +150,30 @@ export class AuthService {
         role: {
           include: {
             rolePermissions: {
-              include: {
-                permission: true,
-              },
+              include: { permission: true },
             },
           },
         },
-        branch: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+            cnpj: true,
+            isActive: true,
+          },
+        },
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
       },
     });
 
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException('Usuário não encontrado');
     }
 
     return {
@@ -177,6 +182,12 @@ export class AuthService {
       name: user.name,
       role: user.role.name,
       permissions: user.role.rolePermissions.map((rp) => rp.permission.code),
+      isSuperAdmin: user.isSuperAdmin,
+      company: user.company ? {
+        id: user.company.id,
+        name: user.company.name,
+        cnpj: user.company.cnpj,
+      } : null,
       branch: user.branch ? {
         id: user.branch.id,
         name: user.branch.name,
@@ -187,12 +198,28 @@ export class AuthService {
     };
   }
 
+  private formatUserResponse(user: any) {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role.name,
+      permissions: user.role.rolePermissions.map((rp: any) => rp.permission.code),
+      isSuperAdmin: user.isSuperAdmin || false,
+      company: user.company ? { id: user.company.id, name: user.company.name } : null,
+      branch: user.branch ? { id: user.branch.id, name: user.branch.name } : null,
+    };
+  }
+
   private generateTokens(user: any) {
     const payload = {
       sub: user.id,
       email: user.email,
       role: user.role.id,
+      roleName: user.role.name,
+      companyId: user.companyId,
       branchId: user.branchId,
+      isSuperAdmin: user.isSuperAdmin || false,
     };
 
     const accessToken = this.jwtService.sign(payload as any, {
@@ -204,9 +231,6 @@ export class AuthService {
       expiresIn: (process.env.JWT_REFRESH_EXPIRATION || '7d') as any,
     });
 
-    return {
-      accessToken,
-      refreshToken,
-    };
+    return { accessToken, refreshToken };
   }
 }

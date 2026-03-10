@@ -40,4 +40,13 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @ApiProperty({
+    example: 'company-id-123',
+    description: 'Company ID (optional - null for super admin)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }

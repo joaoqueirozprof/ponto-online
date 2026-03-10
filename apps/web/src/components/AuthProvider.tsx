@@ -9,6 +9,9 @@ interface User {
   name: string;
   role: string;
   permissions: string[];
+  isSuperAdmin?: boolean;
+  company?: { id: string; name: string } | null;
+  branch?: { id: string; name: string } | null;
 }
 
 interface AuthContextType {

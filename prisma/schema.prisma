@@ -1,5 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Ponto Online - Multi-tenant SaaS Schema
+// v2.0 - Multi-tenant with subscriptions, LGPD compliance, Portaria 671
 
 generator client {
   provider      = "prisma-client-js"
@@ -11,6 +11,112 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// SUBSCRIPTION & BILLING
+// ============================================================
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique // "Starter", "Professional", "Enterprise"
+  description String?
+
+  maxEmployees  Int     @default(20)
+  maxBranches   Int     @default(1)
+  maxDevices    Int     @default(2)
+  maxUsers      Int     @default(3)
+
+  features    Json?    // { "aiAssistant": true, "apiAccess": false, "customReports": true }
+
+  priceMonthly  Int    @default(0) // cents BRL (9900 = R$99,00)
+  priceYearly   Int    @default(0) // cents BRL
+
+  isActive    Boolean  @default(true)
+  trialDays   Int      @default(14)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  companyId String   @unique
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id])
+
+  status    SubscriptionStatus @default(TRIAL)
+
+  trialEndsAt     DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  // Gateway de pagamento
+  externalId        String?   // ID no Asaas/Stripe
+  externalCustomerId String?
+  paymentMethod     String?   // "pix", "boleto", "credit_card"
+
+  cancelledAt DateTime?
+  cancelReason String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoices    Invoice[]
+
+  @@index([companyId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  amount          Int      // cents BRL
+  status          InvoiceStatus @default(PENDING)
+
+  dueDate         DateTime
+  paidAt          DateTime?
+
+  externalId      String?  // ID no gateway
+  paymentUrl      String?  // URL boleto/PIX
+
+  description     String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+// ============================================================
+// COMPANY & TENANT
+// ============================================================
+
 model Company {
   id    String   @id @default(cuid())
   name  String
@@ -18,11 +124,29 @@ model Company {
   address String?
   phone String?
   email String?
+
+  // Settings
+  logoUrl     String?
+  timezone    String   @default("America/Sao_Paulo")
+
+  // LGPD
+  privacyPolicyAcceptedAt DateTime?
+  dpoName     String?   // Encarregado de Dados
+  dpoEmail    String?
+  dataRetentionMonths Int @default(60) // 5 anos = 60 meses
+
+  // Status
+  isActive    Boolean  @default(true)
+  blockedAt   DateTime?
+  blockReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branches Branch[]
-  auditLogs AuditLog[]
+  branches     Branch[]
+  systemUsers  SystemUser[]
+  auditLogs    AuditLog[]
+  subscription Subscription?
 
   @@map("companies")
 }
@@ -54,18 +178,37 @@ model Branch {
   @@map("branches")
 }
 
+// ============================================================
+// AUTH & RBAC
+// ============================================================
+
 model SystemUser {
   id String @id @default(cuid())
   email String @unique
   passwordHash String
   name String
+
+  // Multi-tenant: user belongs to a company
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
   roleId String
   role Role @relation(fields: [roleId], references: [id])
+
   branchId String?
   branch Branch? @relation(fields: [branchId], references: [id])
 
   isActive Boolean @default(true)
   lastLogin DateTime?
+
+  // Password reset
+  resetToken      String?
+  resetTokenExpiry DateTime?
+
+  // LGPD: support access audit
+  isSuperAdmin    Boolean @default(false) // Platform owner (João)
+  supportAccessEnabled Boolean @default(false)
+  supportAccessExpiry  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -73,6 +216,7 @@ model SystemUser {
   auditLogs AuditLog[]
   timesheetApprovals Timesheet[] @relation("approver")
 
+  @@index([companyId])
   @@index([roleId])
   @@index([branchId])
   @@map("system_users")
@@ -82,6 +226,10 @@ model Role {
   id String @id @default(cuid())
   name String @unique
   description String?
+
+  // Whether this role is system-wide or company-specific
+  isSystem Boolean @default(false) // true = SUPER_ADMIN only
+  companyId String? // null = global role, set = company-specific custom role
 
   createdAt DateTime @default(now())
 
@@ -95,6 +243,9 @@ model Permission {
   id String @id @default(cuid())
   code String @unique
   description String?
+
+  // Group permissions for UI display
+  module String? // "users", "employees", "punches", "timesheets", "reports", "devices", "admin", "billing"
 
   rolePermissions RolePermission[]
 
@@ -110,6 +261,10 @@ model RolePermission {
   @@id([roleId, permissionId])
   @@map("role_permissions")
 }
+
+// ============================================================
+// EMPLOYEES
+// ============================================================
 
 model Employee {
   id String @id @default(cuid())
@@ -143,11 +298,16 @@ model Employee {
   punchAdjustments PunchAdjustment[]
   calculationIssues CalculationIssue[]
   overtimeAdjustments OvertimeAdjustment[]
+  punchReceipts PunchReceipt[]
 
   @@index([branchId])
   @@index([scheduleId])
   @@map("employees")
 }
+
+// ============================================================
+// DEVICES
+// ============================================================
 
 model Device {
   id String @id @default(cuid())
@@ -191,6 +351,10 @@ model DeviceSyncLog {
   @@index([deviceId])
   @@map("device_sync_logs")
 }
+
+// ============================================================
+// SCHEDULES
+// ============================================================
 
 model WorkSchedule {
   id String @id @default(cuid())
@@ -259,6 +423,10 @@ enum HolidayType {
   COMPANY
 }
 
+// ============================================================
+// PUNCH RECORDS
+// ============================================================
+
 model RawPunchEvent {
   id String @id @default(cuid())
   deviceId String
@@ -301,6 +469,7 @@ model NormalizedPunch {
   createdAt DateTime @default(now())
 
   punchAdjustments PunchAdjustment[]
+  punchReceipt PunchReceipt?
 
   @@index([employeeId])
   @@index([punchTime])
@@ -319,6 +488,75 @@ enum PunchStatus {
   ADJUSTED
   MANUAL
 }
+
+// ============================================================
+// PORTARIA 671 - COMPROVANTE DE PONTO
+// ============================================================
+
+model PunchReceipt {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  normalizedPunchId String @unique
+  normalizedPunch NormalizedPunch @relation(fields: [normalizedPunchId], references: [id], onDelete: Cascade)
+
+  // Dados do comprovante (Portaria 671)
+  employerName   String  // Razão social
+  employerCnpj   String
+  employeeName   String
+  employeePis    String?
+  punchDateTime  DateTime
+  punchType      String  // "Entrada", "Saída", etc.
+
+  // Hash para integridade (simula assinatura digital)
+  receiptHash    String
+
+  // Delivery
+  sentViaEmail   Boolean @default(false)
+  sentAt         DateTime?
+  pdfPath        String?
+
+  createdAt      DateTime @default(now())
+
+  @@index([employeeId])
+  @@map("punch_receipts")
+}
+
+// ============================================================
+// PORTARIA 671 - AFD (Arquivo Fonte de Dados)
+// ============================================================
+
+model AfdExport {
+  id String @id @default(cuid())
+
+  companyId    String
+  branchId     String?
+
+  startDate    DateTime
+  endDate      DateTime
+
+  // File info
+  filePath     String
+  fileHash     String   // SHA-256 do arquivo
+  recordCount  Int
+
+  // Who generated
+  generatedBy  String
+  generatedAt  DateTime @default(now())
+
+  // Fiscal
+  requestedByAuditor Boolean @default(false)
+  auditorName        String?
+
+  @@index([companyId])
+  @@map("afd_exports")
+}
+
+// ============================================================
+// TIMESHEETS
+// ============================================================
 
 model Timesheet {
   id String @id @default(cuid())
@@ -509,17 +747,25 @@ model OvertimeAdjustment {
   @@map("overtime_adjustments")
 }
 
+// ============================================================
+// AUDIT LOG (LGPD Compliant)
+// ============================================================
+
 model AuditLog {
   id String @id @default(cuid())
   userId String
   user SystemUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  action String
+  action String    // "CREATE", "UPDATE", "DELETE", "VIEW", "EXPORT", "SUPPORT_ACCESS"
   entity String
   entityId String
   oldValues Json?
   newValues Json?
   ipAddress String?
+  userAgent String?
+
+  // LGPD: track if this was a support access
+  isSupportAccess Boolean @default(false)
 
   createdAt DateTime @default(now())
 
@@ -532,5 +778,6 @@ model AuditLog {
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
+  @@index([companyId])
   @@map("audit_logs")
 }
