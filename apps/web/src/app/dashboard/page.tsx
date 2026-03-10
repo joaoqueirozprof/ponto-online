@@ -45,7 +45,8 @@ export default function DashboardPage() {
   const [recentPunches, setRecentPunches] = useState<RecentPunch[]>([]);
   const [weekData, setWeekData] = useState<WeekDay[]>([]);
   const [systemHealth, setSystemHealth] = useState<{ api: boolean; db: boolean; redis: boolean }>({ api: false, db: false, redis: false });
-  const [alerts, setAlerts] = useState<{ type: string; message: string; color: string }[]>([]);
+  const [alerts, setAlerts] = useState<{ type: string; message: string; color: string; href?: string; actionLabel?: string }[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -137,20 +138,20 @@ export default function DashboardPage() {
       setStats(newStats);
 
       // Build alerts
-      const newAlerts: { type: string; message: string; color: string }[] = [];
+      const newAlerts: { type: string; message: string; color: string; href?: string; actionLabel?: string }[] = [];
       if (newStats.pendingTimesheets > 0) {
-        newAlerts.push({ type: 'warning', message: `${newStats.pendingTimesheets} folha(s) de ponto pendente(s) de aprovação`, color: 'amber' });
+        newAlerts.push({ type: 'warning', message: `${newStats.pendingTimesheets} folha(s) de ponto pendente(s) de aprovação`, color: 'amber', href: '/timesheets', actionLabel: 'Revisar' });
       }
       if (newStats.employeesNoPunch > 0) {
-        newAlerts.push({ type: 'alert', message: `${newStats.employeesNoPunch} colaborador(es) sem registro de ponto no mês`, color: 'red' });
+        newAlerts.push({ type: 'alert', message: `${newStats.employeesNoPunch} colaborador(es) sem registro de ponto no mês`, color: 'red', href: '/reports', actionLabel: 'Ver Relatório' });
       }
       if (newStats.monthlyOvertimeMinutes > 0) {
         const otH = Math.floor(newStats.monthlyOvertimeMinutes / 60);
         const otM = newStats.monthlyOvertimeMinutes % 60;
-        newAlerts.push({ type: 'info', message: `Total de horas extras no mês: ${otH}h${otM > 0 ? String(otM).padStart(2,'0')+'min' : ''}`, color: 'blue' });
+        newAlerts.push({ type: 'info', message: `Total de horas extras no mês: ${otH}h${otM > 0 ? String(otM).padStart(2,'0')+'min' : ''}`, color: 'blue', href: '/overtime', actionLabel: 'Ver Detalhes' });
       }
       if (newStats.employees > 0 && newStats.todayPresent === 0 && now.getHours() >= 9 && now.getDay() >= 1 && now.getDay() <= 5) {
-        newAlerts.push({ type: 'alert', message: 'Nenhum colaborador registrou ponto hoje', color: 'red' });
+        newAlerts.push({ type: 'alert', message: 'Nenhum colaborador registrou ponto hoje', color: 'red', href: '/punches', actionLabel: 'Ver Registros' });
       }
       if (nextHoliday) {
         const daysUntil = Math.ceil((new Date(nextHoliday.date).getTime() - todayTime) / (1000 * 60 * 60 * 24));
@@ -159,6 +160,7 @@ export default function DashboardPage() {
         }
       }
       setAlerts(newAlerts);
+      setDismissedAlerts(new Set());
     } catch (err) {
       console.error('Erro ao carregar estatisticas', err);
     } finally {
@@ -361,9 +363,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts */}
-      {alerts.length > 0 && (
+      {alerts.filter((_, i) => !dismissedAlerts.has(i)).length > 0 && (
         <div className="space-y-2">
           {alerts.map((alert, i) => {
+            if (dismissedAlerts.has(i)) return null;
             const alertColors: Record<string, string> = {
               amber: 'bg-amber-50 border-amber-200 text-amber-800',
               red: 'bg-red-50 border-red-200 text-red-800',
@@ -374,6 +377,16 @@ export default function DashboardPage() {
               red: 'text-red-500',
               blue: 'text-blue-500',
             };
+            const btnColors: Record<string, string> = {
+              amber: 'bg-amber-600 hover:bg-amber-700 text-white',
+              red: 'bg-red-600 hover:bg-red-700 text-white',
+              blue: 'bg-blue-600 hover:bg-blue-700 text-white',
+            };
+            const closeBtnColors: Record<string, string> = {
+              amber: 'text-amber-400 hover:text-amber-600 hover:bg-amber-100',
+              red: 'text-red-400 hover:text-red-600 hover:bg-red-100',
+              blue: 'text-blue-400 hover:text-blue-600 hover:bg-blue-100',
+            };
             return (
               <div key={i} className={`flex items-center gap-3 px-4 py-3 rounded-lg border ${alertColors[alert.color] || alertColors.blue}`}>
                 <svg className={`w-5 h-5 flex-shrink-0 ${iconColors[alert.color] || iconColors.blue}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -381,7 +394,26 @@ export default function DashboardPage() {
                   {alert.type === 'alert' && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
                   {alert.type === 'info' && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
                 </svg>
-                <span className="text-sm font-medium">{alert.message}</span>
+                <span className="text-sm font-medium flex-1">{alert.message}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {alert.href && (
+                    <Link
+                      href={alert.href}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${btnColors[alert.color] || btnColors.blue}`}
+                    >
+                      {alert.actionLabel || 'Resolver'}
+                    </Link>
+                  )}
+                  <button
+                    onClick={() => setDismissedAlerts(prev => new Set([...prev, i]))}
+                    className={`p-1 rounded-md transition-colors ${closeBtnColors[alert.color] || closeBtnColors.blue}`}
+                    title="Dispensar notificação"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             );
           })}
