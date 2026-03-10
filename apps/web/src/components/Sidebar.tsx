@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
+import { useState } from 'react';
+import { apiClient } from '@/lib/api';
 
 const menuSections = [
   {
@@ -116,6 +118,24 @@ const menuSections = [
 export default function Sidebar() {
   const { user, logout } = useAuth();
   const pathname = usePathname();
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  const syncPunches = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const r = await apiClient.post('/auto-sync/sync-all');
+      const result = r.data;
+      const total = result?.totalNewPunches ?? result?.results?.reduce((s: number, d: any) => s + (d.newPunches || 0), 0) ?? 0;
+      setSyncResult({ type: 'success', msg: `${total} batida${total !== 1 ? 's' : ''} importada${total !== 1 ? 's' : ''}` });
+    } catch (err: any) {
+      setSyncResult({ type: 'error', msg: err?.response?.data?.message || err?.message || 'Falha' });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncResult(null), 6000);
+    }
+  };
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 flex flex-col z-30">
@@ -168,6 +188,48 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* Sync button - global access */}
+      <div className="px-3 py-2 border-t border-slate-800">
+        <button
+          onClick={syncPunches}
+          disabled={syncing}
+          className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
+            syncing
+              ? 'bg-teal-500/20 text-teal-300 cursor-wait'
+              : syncResult
+                ? syncResult.type === 'success'
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : 'bg-red-500/20 text-red-300'
+                : 'bg-teal-500/10 text-teal-400 hover:bg-teal-500/20 hover:text-teal-300'
+          }`}
+          title="Sincronizar batidas de todos os dispositivos agora"
+        >
+          {syncing ? (
+            <>
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span>Sincronizando...</span>
+            </>
+          ) : syncResult ? (
+            <>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={syncResult.type === 'success' ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'} />
+              </svg>
+              <span className="text-xs truncate">{syncResult.msg}</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>Sincronizar Ponto</span>
+            </>
+          )}
+        </button>
+      </div>
 
       {/* User section */}
       <div className="px-3 py-4 border-t border-slate-800">
