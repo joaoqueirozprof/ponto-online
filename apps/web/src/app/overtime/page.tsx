@@ -762,8 +762,6 @@ export default function OvertimePage() {
   const [errorDetail, setErrorDetail] = useState('');
   const [modalEmp, setModalEmp] = useState<OvertimeEmployee | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
 
   // Load branches
   useEffect(() => {
@@ -1138,27 +1136,6 @@ export default function OvertimePage() {
     setSelectedIds(next);
   };
 
-  // ─── On-demand sync ───
-  const syncPunches = async () => {
-    setSyncing(true);
-    setSyncMsg('');
-    try {
-      const r = await apiClient.post('/auto-sync/sync-all');
-      const result = r.data;
-      const total = result?.totalNewPunches ?? result?.results?.reduce((s: number, d: any) => s + (d.newPunches || 0), 0) ?? 0;
-      setSyncMsg(`Sincronização concluída! ${total} nova(s) batida(s) importada(s).`);
-      // Auto-refresh report after sync
-      if (fetched) {
-        setTimeout(() => fetchReport(), 1000);
-      }
-    } catch (err: any) {
-      setSyncMsg(`Erro na sincronização: ${err?.response?.data?.message || err?.message || 'Falha'}`);
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMsg(''), 8000);
-    }
-  };
-
   const getOTColor = (min: number) => {
     if (min === 0) return 'text-slate-400';
     if (min <= 240) return 'text-emerald-600';
@@ -1196,30 +1173,6 @@ export default function OvertimePage() {
           <p className="text-slate-500 mt-1">Relatório transparente — horas extras com dedução de faltas e atrasos</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* Sync button - always visible */}
-          <button
-            onClick={syncPunches}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
-            title="Sincronizar batidas do relógio de ponto agora"
-          >
-            {syncing ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Sincronizando...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Sincronizar Ponto
-              </>
-            )}
-          </button>
           {fetched && (
             <>
               <button
@@ -1394,18 +1347,6 @@ export default function OvertimePage() {
 
         {errorDetail && <p className="text-xs text-red-500 mt-2">{errorDetail}</p>}
       </div>
-
-      {/* Sync message */}
-      {syncMsg && (
-        <div className={`rounded-xl border p-3 text-sm font-medium ${syncMsg.includes('Erro') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-teal-50 border-teal-200 text-teal-700'}`}>
-          <div className="flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={syncMsg.includes('Erro') ? 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'} />
-            </svg>
-            {syncMsg}
-          </div>
-        </div>
-      )}
 
       {/* Toast */}
       {toast && (
