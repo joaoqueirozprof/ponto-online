@@ -46,7 +46,33 @@ export default function DashboardPage() {
   const [weekData, setWeekData] = useState<WeekDay[]>([]);
   const [systemHealth, setSystemHealth] = useState<{ api: boolean; db: boolean; redis: boolean }>({ api: false, db: false, redis: false });
   const [alerts, setAlerts] = useState<{ type: string; message: string; color: string; href?: string; actionLabel?: string }[]>([]);
-  const [dismissedAlerts, setDismissedAlerts] = useState<Set<number>>(new Set());
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('dashboard_dismissed_alerts');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.month === new Date().getMonth() + 1 && parsed.year === new Date().getFullYear()) {
+          return new Set(parsed.dismissed as string[]);
+        }
+      }
+    } catch {}
+    return new Set();
+  });
+
+  const dismissAlert = (message: string) => {
+    setDismissedAlerts(prev => {
+      const next = new Set([...prev, message]);
+      try {
+        const now = new Date();
+        localStorage.setItem('dashboard_dismissed_alerts', JSON.stringify({
+          month: now.getMonth() + 1,
+          year: now.getFullYear(),
+          dismissed: [...next],
+        }));
+      } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -160,7 +186,6 @@ export default function DashboardPage() {
         }
       }
       setAlerts(newAlerts);
-      setDismissedAlerts(new Set());
     } catch (err) {
       console.error('Erro ao carregar estatisticas', err);
     } finally {
@@ -363,10 +388,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts */}
-      {alerts.filter((_, i) => !dismissedAlerts.has(i)).length > 0 && (
+      {alerts.filter((a) => !dismissedAlerts.has(a.message)).length > 0 && (
         <div className="space-y-2">
           {alerts.map((alert, i) => {
-            if (dismissedAlerts.has(i)) return null;
+            if (dismissedAlerts.has(alert.message)) return null;
             const alertColors: Record<string, string> = {
               amber: 'bg-amber-50 border-amber-200 text-amber-800',
               red: 'bg-red-50 border-red-200 text-red-800',
@@ -405,7 +430,7 @@ export default function DashboardPage() {
                     </Link>
                   )}
                   <button
-                    onClick={() => setDismissedAlerts(prev => new Set([...prev, i]))}
+                    onClick={() => dismissAlert(alert.message)}
                     className={`p-1 rounded-md transition-colors ${closeBtnColors[alert.color] || closeBtnColors.blue}`}
                     title="Dispensar notificação"
                   >
