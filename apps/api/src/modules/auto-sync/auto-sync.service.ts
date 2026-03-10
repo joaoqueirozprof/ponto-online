@@ -182,22 +182,28 @@ export class AutoSyncService {
       orderBy: { punchTime: 'desc' },
     });
 
-    let initialNsr: number | undefined;
-    if (lastRecord?.rawData && typeof lastRecord.rawData === 'object') {
-      const rawData = lastRecord.rawData as any;
-      if (rawData.nsr) {
-        initialNsr = parseInt(rawData.nsr) + 1;
-      }
-    }
-
-    // Also try date-based filter: get records from last sync date
+    // Use date-based initial_date as primary incremental filter.
+    // NSR-based filtering is unreliable: the device's internal NSR range
+    // may not match what we stored (e.g. device was reset, or NSR from
+    // a different source was used). Date-based filtering always works.
+    let initialNsr: number | undefined; // intentionally not used — kept for reference
     let initialDate: { day: number; month: number; year: number } | undefined;
-    if (lastSync?.finishedAt && !initialNsr) {
-      const d = lastSync.finishedAt;
+
+    if (lastSync?.finishedAt) {
+      // Start from the last sync date (subtract 1 day as safety margin)
+      const d = new Date(lastSync.finishedAt.getTime() - 24 * 3600 * 1000);
       initialDate = {
-        day: d.getDate(),
-        month: d.getMonth() + 1,
-        year: d.getFullYear(),
+        day: d.getUTCDate(),
+        month: d.getUTCMonth() + 1,
+        year: d.getUTCFullYear(),
+      };
+    } else {
+      // No previous sync — start from beginning of current month
+      const now = new Date();
+      initialDate = {
+        day: 1,
+        month: now.getUTCMonth() + 1,
+        year: now.getUTCFullYear(),
       };
     }
 
