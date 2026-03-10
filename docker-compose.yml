@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: "ponto_online"
       POSTGRES_USER: "ponto_admin"
-      POSTGRES_PASSWORD: "PontoSecure2026"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
     volumes:
       - ponto-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -42,16 +42,16 @@ services:
     container_name: ponto-api
     restart: always
     ports:
-      - "4010:4010"
+      - "${API_PORT:-4010}:4010"
     environment:
-      NODE_ENV: "production"
-      API_PORT: "4010"
-      API_HOST: "0.0.0.0"
-      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
-      REDIS_URL: "redis://ponto-redis:6379"
-      JWT_SECRET: "ponto-jwt-secret-2026-prod"
-      JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-prod"
-      CORS_ORIGIN: "http://72.61.129.78:3010"
+      NODE_ENV: "${NODE_ENV:-production}"
+      API_PORT: "${API_PORT:-4010}"
+      API_HOST: "${API_HOST:-0.0.0.0}"
+      DATABASE_URL: "${DATABASE_URL}"
+      REDIS_URL: "${REDIS_URL:-redis://ponto-redis:6379}"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET}"
+      CORS_ORIGIN: "${CORS_ORIGIN}"
       # TLS legado: habilita TLS 1.0/1.1 e cifras antigas para Control iD firmware antigo
       # OPENSSL_CONF aponta para config com MinProtocol=TLSv1 e SECLEVEL=0 (legacy ciphers)
       OPENSSL_CONF: "/app/openssl_legacy.cnf"
@@ -72,9 +72,9 @@ services:
     container_name: ponto-worker
     restart: always
     environment:
-      NODE_ENV: "production"
-      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
-      REDIS_URL: "redis://ponto-redis:6379"
+      NODE_ENV: "${NODE_ENV:-production}"
+      DATABASE_URL: "${DATABASE_URL}"
+      REDIS_URL: "${REDIS_URL:-redis://ponto-redis:6379}"
     depends_on:
       ponto-db:
         condition: service_healthy
@@ -90,7 +90,7 @@ services:
     volumes:
       - ./scripts/migrate-employee-punches.sql:/migration.sql:ro
     environment:
-      PGPASSWORD: "PontoSecure2026"
+      PGPASSWORD: "${DB_PASSWORD}"
     entrypoint: >
       sh -c "
         echo '=== Starting Employee Punch Migration ===' &&
@@ -114,9 +114,9 @@ services:
     container_name: ponto-web
     restart: always
     ports:
-      - "3010:3000"
+      - "${WEB_PORT:-3010}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://72.61.129.78:4010/api/v1"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL}"
     depends_on:
       - ponto-api
     networks:

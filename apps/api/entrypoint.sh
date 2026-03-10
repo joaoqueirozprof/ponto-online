@@ -17,7 +17,7 @@ node scripts/fix-unmatched-employees.js 2>&1 || echo "Fix unmatched completed (m
 
 # 3. Migrate employee punches via psql
 echo "Running employee punch migration via psql..."
-PGPASSWORD=PontoSecure2026 psql -h ponto-db -U ponto_admin -d ponto_online -f scripts/migrate-employee-punches.sql 2>&1 && echo "Punch migration SUCCESS" || echo "Punch migration may have warnings"
+PGPASSWORD="${DB_PASSWORD}" psql -h ponto-db -U ponto_admin -d ponto_online -f scripts/migrate-employee-punches.sql 2>&1 && echo "Punch migration SUCCESS" || echo "Punch migration may have warnings"
 
 # 4. Start the API
 echo "Starting API server..."

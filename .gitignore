@@ -85,4 +85,3 @@ backups/
 .parcel-cache
 .env.*.local
 *.tsbuildinfo
-.github/
