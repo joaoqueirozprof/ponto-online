@@ -1,6 +1,36 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
+/** BRT offset in milliseconds (UTC-3) */
+const BRT_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+/**
+ * Convert a UTC Date to a BRT (UTC-3) date string YYYY-MM-DD.
+ */
+function utcToBrtDateStr(utcDate: Date): string {
+  const brt = new Date(utcDate.getTime() + BRT_OFFSET_MS);
+  return brt.toISOString().split('T')[0];
+}
+
+/**
+ * Get BRT month boundaries as UTC Date objects.
+ * BRT first day 00:00 = UTC 03:00, BRT last day 23:59:59 = UTC next month 02:59:59
+ */
+function getBrtMonthBoundsUtc(month: number, year: number): { startDate: Date; endDate: Date } {
+  const startDate = new Date(Date.UTC(year, month - 1, 1, 3, 0, 0, 0));
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const endDate = new Date(Date.UTC(year, month - 1, daysInMonth + 1, 2, 59, 59, 999));
+  return { startDate, endDate };
+}
+
+/**
+ * Get BRT hour from a UTC Date (for night-hour detection).
+ */
+function getBrtHour(utcDate: Date): number {
+  const brt = new Date(utcDate.getTime() + BRT_OFFSET_MS);
+  return brt.getUTCHours();
+}
+
 @Injectable()
 export class TimesheetsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -34,9 +64,8 @@ export class TimesheetsService {
       timesheet = await this.createEmptyTimesheet(employeeId, month, year);
     }
 
-    // Fetch punches for the month to include entry/exit times per day
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    // Fetch punches for the month using BRT boundaries
+    const { startDate, endDate } = getBrtMonthBoundsUtc(month, year);
 
     const monthPunches = await this.prisma.normalizedPunch.findMany({
       where: {
@@ -49,10 +78,10 @@ export class TimesheetsService {
       orderBy: { punchTime: 'asc' },
     });
 
-    // Group punches by date
+    // Group punches by BRT date (not UTC!)
     const punchesByDate: Record<string, Array<{ time: string; type: string; status: string }>> = {};
     for (const punch of monthPunches) {
-      const dateKey = punch.punchTime.toISOString().split('T')[0];
+      const dateKey = utcToBrtDateStr(punch.punchTime);
       if (!punchesByDate[dateKey]) {
         punchesByDate[dateKey] = [];
       }
@@ -78,7 +107,7 @@ export class TimesheetsService {
       }
 
       const holidays = await this.prisma.holiday.findMany({
-        where: { date: { gte: startDate, lte: endDate } },
+        where: { date: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) } },
       });
       const holidayDates = new Set(holidays.map(h => h.date.toISOString().split('T')[0]));
 
@@ -88,9 +117,9 @@ export class TimesheetsService {
       let totalOvertime = 0;
 
       for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(year, month - 1, day);
-        const dateStr = date.toISOString().split('T')[0];
-        const dayOfWeek = date.getDay();
+        const date = new Date(Date.UTC(year, month - 1, day));
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayOfWeek = new Date(year, month - 1, day).getDay();
         const dayPunches = punchesByDate[dateStr] || [];
         const scheduleEntry = scheduleByDay[dayOfWeek];
         const isHoliday = holidayDates.has(dateStr);
@@ -229,9 +258,8 @@ export class TimesheetsService {
       where: { timesheetId: timesheet.id },
     });
 
-    // Get all normalized punches for this employee in this month
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    // Get all normalized punches using BRT month boundaries
+    const { startDate, endDate } = getBrtMonthBoundsUtc(month, year);
 
     const punches = await this.prisma.normalizedPunch.findMany({
       where: {
@@ -248,17 +276,17 @@ export class TimesheetsService {
     const holidays = await this.prisma.holiday.findMany({
       where: {
         date: {
-          gte: startDate,
-          lte: endDate,
+          gte: new Date(Date.UTC(year, month - 1, 1)),
+          lte: new Date(Date.UTC(year, month, 0)),
         },
       },
     });
     const holidayDates = new Set(holidays.map(h => h.date.toISOString().split('T')[0]));
 
-    // Group punches by date
+    // Group punches by BRT date (not UTC!)
     const punchesByDate: Record<string, any[]> = {};
     for (const p of punches) {
-      const dateStr = p.punchTime.toISOString().split('T')[0];
+      const dateStr = utcToBrtDateStr(p.punchTime);
       if (!punchesByDate[dateStr]) {
         punchesByDate[dateStr] = [];
       }
@@ -283,9 +311,9 @@ export class TimesheetsService {
     let totalLate = 0;
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day);
-      const dateStr = date.toISOString().split('T')[0];
-      const dayOfWeek = date.getDay(); // 0=Sunday
+      const date = new Date(Date.UTC(year, month - 1, day));
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayOfWeek = new Date(year, month - 1, day).getDay(); // 0=Sunday
       const dayPunches = punchesByDate[dateStr] || [];
       const scheduleEntry = scheduleByDay[dayOfWeek];
       const isHoliday = holidayDates.has(dateStr);
@@ -305,7 +333,7 @@ export class TimesheetsService {
 
       // Calculate worked time from punch pairs
       if (dayPunches.length >= 2) {
-        const sorted = dayPunches.sort((a, b) => a.punchTime.getTime() - b.punchTime.getTime());
+        const sorted = [...dayPunches].sort((a, b) => a.punchTime.getTime() - b.punchTime.getTime());
 
         // Find ENTRY/EXIT pairs
         let entryTime: Date | null = null;
@@ -316,7 +344,6 @@ export class TimesheetsService {
             entryTime = p.punchTime;
           } else if (p.punchType === 'BREAK_START' && entryTime) {
             if (breakStart === null) {
-              // Time from entry to break start
               workedMinutes += Math.floor((p.punchTime.getTime() - entryTime.getTime()) / 60000);
               breakStart = p.punchTime;
               entryTime = null;
@@ -325,7 +352,7 @@ export class TimesheetsService {
             if (breakStart) {
               breakMinutes += Math.floor((p.punchTime.getTime() - breakStart.getTime()) / 60000);
               breakStart = null;
-              entryTime = p.punchTime; // Resume counting from break end
+              entryTime = p.punchTime;
             }
           } else if (p.punchType === 'EXIT' && entryTime) {
             workedMinutes += Math.floor((p.punchTime.getTime() - entryTime.getTime()) / 60000);
@@ -350,7 +377,6 @@ export class TimesheetsService {
         const [sh, sm] = scheduleEntry.startTime.split(':').map(Number);
         const [eh, em] = scheduleEntry.endTime.split(':').map(Number);
         expectedMinutes = (eh * 60 + em) - (sh * 60 + sm);
-        // Subtract scheduled break
         if (scheduleEntry.breakStartTime && scheduleEntry.breakEndTime) {
           const [bsh, bsm] = scheduleEntry.breakStartTime.split(':').map(Number);
           const [beh, bem] = scheduleEntry.breakEndTime.split(':').map(Number);
@@ -373,27 +399,17 @@ export class TimesheetsService {
           status = 'ABSENCE';
         }
       } else if (!isWorkDay && workedMinutes > 0) {
-        // Working on non-work day = overtime
         overtimeMinutes = workedMinutes;
       }
 
-      // Calculate night hours (22:00 - 05:00)
+      // Calculate night hours (22:00 - 05:00 BRT)
       let nightMinutes = 0;
       if (dayPunches.length >= 2) {
-        for (const p of dayPunches) {
-          const hour = p.punchTime.getHours();
-          if (hour >= 22 || hour < 5) {
-            nightMinutes += 1; // approximate - count each punch in night period
-          }
-        }
-        // Better approximation: if any work spans night hours
-        const sorted = dayPunches.sort((a, b) => a.punchTime.getTime() - b.punchTime.getTime());
-        const firstHour = sorted[0].punchTime.getHours();
-        const lastHour = sorted[sorted.length - 1].punchTime.getHours();
-        if (firstHour < 5 || lastHour >= 22) {
-          nightMinutes = Math.min(workedMinutes, 60); // Cap at 60 minutes for night approximation
-        } else {
-          nightMinutes = 0;
+        const sorted = [...dayPunches].sort((a, b) => a.punchTime.getTime() - b.punchTime.getTime());
+        const firstBrtHour = getBrtHour(sorted[0].punchTime);
+        const lastBrtHour = getBrtHour(sorted[sorted.length - 1].punchTime);
+        if (firstBrtHour < 5 || lastBrtHour >= 22) {
+          nightMinutes = Math.min(workedMinutes, 60);
         }
       }
 

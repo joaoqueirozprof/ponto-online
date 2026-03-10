@@ -3,6 +3,55 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ControlIdService } from './control-id.service';
 
+/** BRT offset in milliseconds (UTC-3) */
+const BRT_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+/**
+ * Convert a UTC Date to a BRT (UTC-3) date string YYYY-MM-DD.
+ * This ensures punches are grouped by the local day in Fortaleza, not UTC day.
+ */
+function utcToBrtDateStr(utcDate: Date): string {
+  const brt = new Date(utcDate.getTime() + BRT_OFFSET_MS);
+  return brt.toISOString().split('T')[0];
+}
+
+/**
+ * Get BRT day boundaries as UTC Date objects.
+ * For a given UTC punch time, returns the UTC range that corresponds to the
+ * BRT calendar day containing that punch.
+ * BRT 00:00 = UTC 03:00, BRT 23:59:59 = UTC+1 02:59:59
+ */
+function getBrtDayBoundsUtc(utcDate: Date): { dayStart: Date; dayEnd: Date } {
+  const brtDateStr = utcToBrtDateStr(utcDate);
+  const [y, m, d] = brtDateStr.split('-').map(Number);
+  // BRT 00:00:00 in UTC = that date at 03:00:00 UTC
+  const dayStart = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
+  // BRT 23:59:59.999 in UTC = next day at 02:59:59.999 UTC
+  const dayEnd = new Date(Date.UTC(y, m - 1, d + 1, 2, 59, 59, 999));
+  return { dayStart, dayEnd };
+}
+
+/**
+ * Get BRT month boundaries as UTC Date objects.
+ * Returns the UTC range for the entire BRT month.
+ */
+function getBrtMonthBoundsUtc(month: number, year: number): { startDate: Date; endDate: Date } {
+  // BRT first day 00:00 = UTC 03:00 of that day
+  const startDate = new Date(Date.UTC(year, month - 1, 1, 3, 0, 0, 0));
+  // BRT last day 23:59:59 = UTC next month 1st at 02:59:59
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const endDate = new Date(Date.UTC(year, month - 1, daysInMonth + 1, 2, 59, 59, 999));
+  return { startDate, endDate };
+}
+
+/**
+ * Get the BRT month and year for a UTC date.
+ */
+function getBrtMonthYear(utcDate: Date): { month: number; year: number } {
+  const brt = new Date(utcDate.getTime() + BRT_OFFSET_MS);
+  return { month: brt.getUTCMonth() + 1, year: brt.getUTCFullYear() };
+}
+
 @Injectable()
 export class AutoSyncService {
   private readonly logger = new Logger(AutoSyncService.name);
@@ -323,11 +372,9 @@ export class AutoSyncService {
 
         // Create normalized punch if employee found
         if (employeeId) {
-          // Determine punch type based on existing punches for this day
-          const dayStart = new Date(punchTime);
-          dayStart.setUTCHours(0, 0, 0, 0);
-          const dayEnd = new Date(punchTime);
-          dayEnd.setUTCHours(23, 59, 59, 999);
+          // Determine punch type based on existing punches for this BRT day
+          // BRT = UTC-3, so we use BRT day boundaries to correctly group punches
+          const { dayStart, dayEnd } = getBrtDayBoundsUtc(punchTime);
 
           const existingPunches = await this.prisma.normalizedPunch.findMany({
             where: {
@@ -352,8 +399,9 @@ export class AutoSyncService {
             },
           });
 
-          // Track affected employee/months for recalculation
-          const monthKey = `${employeeId}:${punchTime.getUTCMonth() + 1}:${punchTime.getUTCFullYear()}`;
+          // Track affected employee/months for recalculation using BRT date
+          const { month: brtMonth, year: brtYear } = getBrtMonthYear(punchTime);
+          const monthKey = `${employeeId}:${brtMonth}:${brtYear}`;
           affectedEmployeeMonths.add(monthKey);
         }
 
@@ -503,9 +551,9 @@ export class AutoSyncService {
       where: { timesheetId: timesheet.id },
     });
 
-    // Get punches
-    const startDate = new Date(Date.UTC(year, month - 1, 1));
-    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+    // Get punches using BRT month boundaries
+    // BRT first day 00:00 = UTC 03:00, BRT last day 23:59:59 = UTC next month 02:59:59
+    const { startDate, endDate } = getBrtMonthBoundsUtc(month, year);
 
     const punches = await this.prisma.normalizedPunch.findMany({
       where: {
@@ -517,14 +565,14 @@ export class AutoSyncService {
 
     // Holidays
     const holidays = await this.prisma.holiday.findMany({
-      where: { date: { gte: startDate, lte: endDate } },
+      where: { date: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) } },
     });
     const holidayDates = new Set(holidays.map(h => h.date.toISOString().split('T')[0]));
 
-    // Group by date
+    // Group by BRT date (not UTC date!)
     const punchesByDate: Record<string, any[]> = {};
     for (const p of punches) {
-      const dateStr = p.punchTime.toISOString().split('T')[0];
+      const dateStr = utcToBrtDateStr(p.punchTime);
       if (!punchesByDate[dateStr]) punchesByDate[dateStr] = [];
       punchesByDate[dateStr].push(p);
     }
@@ -543,7 +591,7 @@ export class AutoSyncService {
 
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(Date.UTC(year, month - 1, day));
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const dayOfWeek = new Date(year, month - 1, day).getDay();
       const dayPunches = punchesByDate[dateStr] || [];
       const scheduleEntry = scheduleByDay[dayOfWeek];

@@ -236,10 +236,11 @@ export default function DashboardPage() {
     try {
       const d = new Date(dateStr);
       const today = new Date();
-      const isToday = d.toDateString() === today.toDateString();
-      const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const isToday = d.toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' }) === today.toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });
+      const time = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', hour12: false });
       if (isToday) return `Hoje, ${time}`;
-      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${time}`;
+      const datePart = d.toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza', day: '2-digit', month: '2-digit' });
+      return `${datePart} ${time}`;
     } catch {
       return dateStr;
     }
