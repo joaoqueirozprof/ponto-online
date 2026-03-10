@@ -525,4 +525,15 @@ export class ControlIdService {
   accessLogToUtcDate(unixTs: number): Date {
     return new Date((unixTs + 3 * 3600) * 1000);
   }
+
+  /**
+   * Probe device with arbitrary endpoint/body (for debugging)
+   */
+  async probeEndpoint(deviceId: string, endpoint: string, body?: any): Promise<any> {
+    try {
+      return await this.request(deviceId, endpoint, body);
+    } catch (error: any) {
+      return { error: error.message };
+    }
+  }
 }

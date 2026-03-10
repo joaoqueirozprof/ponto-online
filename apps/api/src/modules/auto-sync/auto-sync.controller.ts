@@ -101,6 +101,15 @@ export class AutoSyncController {
     return this.controlIdService.createUsers(deviceId, [body]);
   }
 
+  @Post('device/:deviceId/probe')
+  @ApiOperation({ summary: 'Probe device with arbitrary endpoint (debugging)' })
+  async probeDevice(
+    @Param('deviceId') deviceId: string,
+    @Body() body: { endpoint: string; payload?: any },
+  ) {
+    return this.controlIdService.probeEndpoint(deviceId, body.endpoint, body.payload);
+  }
+
   @Get('device/:deviceId/afd')
   @ApiOperation({ summary: 'Get raw AFD from Control ID device' })
   async getDeviceAfd(@Param('deviceId') deviceId: string) {
