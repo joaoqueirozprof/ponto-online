@@ -110,6 +110,9 @@ export class AutoSyncService {
 
       this.logger.log(`Found ${devices.length} active devices to sync`);
 
+      // First, repair any unmatched records (employeeId = null) using improved PIS matching
+      await this.repairUnmatchedPunches();
+
       for (const device of devices) {
         try {
           const result = await this.syncDevice(device.id);
@@ -331,7 +334,12 @@ export class AutoSyncService {
     const pisToEmployee: Record<string, string> = {};
     const regToEmployee: Record<string, string> = {};
     for (const emp of employees) {
-      if (emp.pis) pisToEmployee[emp.pis] = emp.id;
+      if (emp.pis) {
+        // Store PIS both as-is AND with leading zero (AFD uses 12-digit zero-padded PIS)
+        pisToEmployee[emp.pis] = emp.id;
+        pisToEmployee[emp.pis.replace(/^0+/, '')] = emp.id; // stripped
+        pisToEmployee[emp.pis.padStart(12, '0')] = emp.id;  // 12-digit padded
+      }
       if (emp.deviceUserId) regToEmployee[emp.deviceUserId] = emp.id;
       if (emp.registration) regToEmployee[emp.registration] = emp.id;
     }
@@ -351,7 +359,16 @@ export class AutoSyncService {
             : this.controlId.afdToUtcDate(record.date, record.time);
 
         // Find employee by PIS or registration
-        const employeeId = pisToEmployee[record.pis] || regToEmployee[record.pis] || null;
+        // Normalize: try as-is, stripped of leading zeros, and 12-digit zero-padded
+        const pisTrimmed = record.pis.replace(/^0+/, '');
+        const pisPadded = record.pis.padStart(12, '0');
+        const employeeId =
+          pisToEmployee[record.pis] ||
+          pisToEmployee[pisTrimmed] ||
+          pisToEmployee[pisPadded] ||
+          regToEmployee[record.pis] ||
+          regToEmployee[pisTrimmed] ||
+          null;
 
         // Check for duplicate (same device, same time, same PIS)
         const existing = await this.prisma.rawPunchEvent.findFirst({
@@ -507,6 +524,120 @@ export class AutoSyncService {
       errors,
       affectedTimesheets: affectedEmployeeMonths.size,
     };
+  }
+
+  /**
+   * Repair raw punch events that have employeeId = null by re-matching PIS.
+   * This fixes records imported before PIS normalization was added.
+   */
+  async repairUnmatchedPunches(): Promise<{ repaired: number; total: number }> {
+    const unmatched = await this.prisma.rawPunchEvent.findMany({
+      where: { employeeId: null },
+      select: { id: true, rawData: true, deviceId: true, punchTime: true },
+    });
+
+    if (unmatched.length === 0) {
+      return { repaired: 0, total: 0 };
+    }
+
+    this.logger.log(`Found ${unmatched.length} unmatched punch records — attempting PIS repair`);
+
+    // Build PIS → employee map for all employees
+    const employees = await this.prisma.employee.findMany({
+      select: { id: true, pis: true, registration: true, branchId: true },
+    });
+
+    const pisToEmployee: Record<string, string> = {};
+    for (const emp of employees) {
+      if (emp.pis) {
+        pisToEmployee[emp.pis] = emp.id;
+        pisToEmployee[emp.pis.replace(/^0+/, '')] = emp.id;
+        pisToEmployee[emp.pis.padStart(12, '0')] = emp.id;
+      }
+      if (emp.registration) {
+        pisToEmployee[emp.registration] = emp.id;
+      }
+    }
+
+    let repaired = 0;
+    const affectedEmployeeMonths = new Set<string>();
+
+    for (const record of unmatched) {
+      const rawData = record.rawData as any;
+      if (!rawData?.pis) continue;
+
+      const pis = String(rawData.pis);
+      const pisTrimmed = pis.replace(/^0+/, '');
+      const pisPadded = pis.padStart(12, '0');
+
+      const employeeId =
+        pisToEmployee[pis] ||
+        pisToEmployee[pisTrimmed] ||
+        pisToEmployee[pisPadded] ||
+        null;
+
+      if (employeeId) {
+        await this.prisma.rawPunchEvent.update({
+          where: { id: record.id },
+          data: { employeeId },
+        });
+
+        // Also create/update normalized punch
+        const { dayStart, dayEnd } = getBrtDayBoundsUtc(record.punchTime);
+        const dayRawPunches = await this.prisma.rawPunchEvent.findMany({
+          where: {
+            employeeId,
+            punchTime: { gte: dayStart, lte: dayEnd },
+          },
+          orderBy: { punchTime: 'asc' },
+        });
+
+        // Deduplicate within 2 minutes
+        const deduped: typeof dayRawPunches = [];
+        for (const rp of dayRawPunches) {
+          if (deduped.length === 0) {
+            deduped.push(rp);
+          } else {
+            const prev = deduped[deduped.length - 1];
+            const diffSec = (rp.punchTime.getTime() - prev.punchTime.getTime()) / 1000;
+            if (diffSec > 120) deduped.push(rp);
+          }
+        }
+
+        // Re-create normalized punches for this day
+        await this.prisma.normalizedPunch.deleteMany({
+          where: { employeeId, punchTime: { gte: dayStart, lte: dayEnd } },
+        });
+
+        const types = ['ENTRY', 'EXIT', 'ENTRY', 'EXIT', 'ENTRY', 'EXIT'];
+        for (let i = 0; i < deduped.length; i++) {
+          await this.prisma.normalizedPunch.create({
+            data: {
+              rawPunchEventId: deduped[i].id,
+              employeeId,
+              punchTime: deduped[i].punchTime,
+              originalTime: deduped[i].punchTime,
+              punchType: types[i % types.length] as any,
+              status: 'NORMAL',
+            },
+          });
+        }
+
+        // Track for timesheet recalculation
+        const { month: brtMonth, year: brtYear } = getBrtMonthYear(record.punchTime);
+        affectedEmployeeMonths.add(`${employeeId}:${brtMonth}:${brtYear}`);
+        repaired++;
+      }
+    }
+
+    // Recalculate affected timesheets
+    if (affectedEmployeeMonths.size > 0) {
+      this.logger.log(`Repairing ${repaired} records affected ${affectedEmployeeMonths.size} employee/months — recalculating timesheets`);
+      await this.recalculateAffected(affectedEmployeeMonths);
+    }
+
+    this.logger.log(`PIS repair complete: ${repaired} of ${unmatched.length} records matched`);
+    return { repaired, total: unmatched.length };
   }
 
   /**
