@@ -6,26 +6,32 @@ import {
   Param,
   Body,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ReportsService } from './reports.service';
 
 @ApiTags('Reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('migrate-employee-punches')
-  @ApiOperation({ summary: 'Migrate punches from old employee IDs to new ones (one-time)' })
+  @RequirePermissions('admin.all')
+  @ApiOperation({ summary: 'Migrar registros de ponto (one-time admin)' })
   migrateEmployeePunches() {
     return this.reportsService.migrateEmployeePunches();
   }
 
   @Get('employee/:employeeId/:month/:year')
-  @ApiOperation({ summary: 'Get employee timesheet report' })
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Relatório de ponto do funcionário' })
   getEmployeeReport(
     @Param('employeeId') employeeId: string,
     @Param('month') month: number,
@@ -35,7 +41,8 @@ export class ReportsController {
   }
 
   @Get('branch/:branchId/:month/:year')
-  @ApiOperation({ summary: 'Get branch summary report' })
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Relatório resumo da filial' })
   getBranchReport(
     @Param('branchId') branchId: string,
     @Param('month') month: number,
@@ -45,7 +52,8 @@ export class ReportsController {
   }
 
   @Get('payroll/:branchId/:month/:year')
-  @ApiOperation({ summary: 'Get payroll report with overtime calculations' })
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Relatório de folha de pagamento com horas extras' })
   getPayrollReport(
     @Param('branchId') branchId: string,
     @Param('month') month: number,
@@ -55,7 +63,8 @@ export class ReportsController {
   }
 
   @Post('overtime-adjustment')
-  @ApiOperation({ summary: 'Save an HR overtime adjustment with reason' })
+  @RequirePermissions('reports.edit')
+  @ApiOperation({ summary: 'Salvar ajuste de horas extras' })
   saveOvertimeAdjustment(
     @Body() body: {
       employeeId: string;
@@ -72,7 +81,8 @@ export class ReportsController {
   }
 
   @Get('overtime-adjustments/:employeeId/:month/:year')
-  @ApiOperation({ summary: 'Get all HR adjustments for an employee in a month' })
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Ajustes de horas extras do funcionário' })
   getOvertimeAdjustments(
     @Param('employeeId') employeeId: string,
     @Param('month') month: number,
@@ -82,7 +92,8 @@ export class ReportsController {
   }
 
   @Delete('overtime-adjustment/:id')
-  @ApiOperation({ summary: 'Delete an HR overtime adjustment' })
+  @RequirePermissions('reports.edit')
+  @ApiOperation({ summary: 'Excluir ajuste de horas extras' })
   deleteOvertimeAdjustment(@Param('id') id: string) {
     return this.reportsService.deleteOvertimeAdjustment(id);
   }

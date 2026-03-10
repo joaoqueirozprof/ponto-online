@@ -14,18 +14,22 @@ ENV OPENSSL_CONF=/app/openssl_legacy.cnf
 COPY apps/api/package.json ./
 RUN npm install
 
-# Copy prisma and generate client
+# Install tsx for running seed.ts
+RUN npm install -g tsx
+
+# Copy prisma schema and seed
 COPY prisma/schema.prisma ./prisma/schema.prisma
+COPY prisma/seed.ts ./prisma/seed.ts
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Copy config and source - CACHEBUST forces rebuild from here
-ARG CACHEBUST=80
+ARG CACHEBUST=81
 RUN echo "CACHEBUST=${CACHEBUST}"
 COPY apps/api/tsconfig.json ./tsconfig.json
 COPY apps/api/nest-cli.json ./nest-cli.json
 COPY apps/api/src/ ./src/
 
-# Build NestJS - allow failure since entrypoint rebuilds from volume-mounted source
+# Build NestJS
 RUN npx nest build 2>&1 && echo "BUILD SUCCESS v${CACHEBUST}" || echo "BUILD WARNING: nest build had issues, will rebuild at startup"
 
 # Copy update scripts

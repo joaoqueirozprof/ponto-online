@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -7,13 +7,23 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateEmployeeDto) {
+  async create(dto: CreateEmployeeDto, companyId?: string) {
     const existingEmployee = await this.prisma.employee.findUnique({
       where: { cpf: dto.cpf },
     });
 
     if (existingEmployee) {
-      throw new BadRequestException('Employee with this CPF already exists');
+      throw new BadRequestException('Já existe um funcionário com este CPF');
+    }
+
+    // Validate branch belongs to company
+    if (dto.branchId && companyId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: dto.branchId, companyId },
+      });
+      if (!branch) {
+        throw new ForbiddenException('Filial não pertence à sua empresa');
+      }
     }
 
     return this.prisma.employee.create({
@@ -29,10 +39,20 @@ export class EmployeesService {
     });
   }
 
-  async findAll(branchId?: string, skip: any = 0, take: any = 10, isActive?: boolean, search?: string) {
+  async findAll(companyId?: string, branchId?: string, skip: any = 0, take: any = 10, isActive?: boolean, search?: string) {
     skip = Number(skip) || 0;
     take = Number(take) || 10;
     const where: any = {};
+    
+    // Tenant isolation: filter by company branches
+    if (companyId) {
+      const companyBranches = await this.prisma.branch.findMany({
+        where: { companyId },
+        select: { id: true },
+      });
+      where.branchId = { in: companyBranches.map(b => b.id) };
+    }
+    
     if (branchId) where.branchId = branchId;
     if (isActive !== undefined) where.isActive = isActive;
     if (search) {
@@ -69,7 +89,7 @@ export class EmployeesService {
     return { data, total, skip, take };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, companyId?: string) {
     const employee = await this.prisma.employee.findUnique({
       where: { id },
       include: {
@@ -83,14 +103,24 @@ export class EmployeesService {
     });
 
     if (!employee) {
-      throw new NotFoundException(`Employee with ID ${id} not found`);
+      throw new NotFoundException(`Funcionário não encontrado`);
+    }
+
+    // Tenant isolation check
+    if (companyId && employee.branch) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: employee.branchId, companyId },
+      });
+      if (!branch) {
+        throw new ForbiddenException('Acesso negado a este funcionário');
+      }
     }
 
     return employee;
   }
 
-  async update(id: string, dto: UpdateEmployeeDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateEmployeeDto, companyId?: string) {
+    await this.findOne(id, companyId);
 
     if (dto.cpf) {
       const existingEmployee = await this.prisma.employee.findUnique({
@@ -98,7 +128,7 @@ export class EmployeesService {
       });
 
       if (existingEmployee && existingEmployee.id !== id) {
-        throw new BadRequestException('Employee with this CPF already exists');
+        throw new BadRequestException('Já existe um funcionário com este CPF');
       }
     }
 
@@ -112,8 +142,8 @@ export class EmployeesService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, companyId?: string) {
+    await this.findOne(id, companyId);
 
     return this.prisma.employee.delete({
       where: { id },

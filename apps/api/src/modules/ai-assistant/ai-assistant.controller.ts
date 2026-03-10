@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Body, Param, Res, UseGuards, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Res, UseGuards, NotFoundException, Request } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
 import { AiAssistantService } from './ai-assistant.service';
 import { Response } from 'express';
 
@@ -11,19 +12,19 @@ export class AiAssistantController {
 
   @Post('chat')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Send a message to the AI assistant' })
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiOperation({ summary: 'Enviar mensagem ao assistente de IA' })
   async chat(
     @Body('message') message: string,
     @Body('conversationHistory') conversationHistory?: { role: string; content: string }[],
+    @Request() req?: any,
   ) {
-    return this.aiService.chat(message, conversationHistory || []);
+    return this.aiService.chat(message, conversationHistory || [], req?.tenantCompanyId);
   }
 
   @Get('pdf/:fileName')
-  @ApiOperation({ summary: 'Download a generated PDF report' })
+  @ApiOperation({ summary: 'Download de relatório PDF gerado' })
   async downloadPdf(@Param('fileName') fileName: string, @Res() res: Response) {
-    // Sanitize filename to prevent directory traversal
     const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, '');
     if (!sanitized.endsWith('.pdf')) {
       throw new NotFoundException('Arquivo não encontrado');

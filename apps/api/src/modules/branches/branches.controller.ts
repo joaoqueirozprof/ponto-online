@@ -8,55 +8,66 @@ import {
   Delete,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { BranchesService } from './branches.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @ApiTags('Branches')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('branches')
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new branch' })
-  create(@Body() createBranchDto: CreateBranchDto) {
-    return this.branchesService.create(createBranchDto);
+  @RequirePermissions('company.edit')
+  @ApiOperation({ summary: 'Criar nova filial' })
+  create(@Body() createBranchDto: CreateBranchDto, @Request() req: any) {
+    return this.branchesService.create(createBranchDto, req.tenantCompanyId);
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all branches' })
+  @ApiOperation({ summary: 'Listar filiais' })
   findAll(
+    @Request() req: any,
     @Query('companyId') companyId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
     @Query('search') search?: string,
   ) {
-    return this.branchesService.findAll(companyId, skip, take, search);
+    // Use tenant companyId unless super admin specifies one
+    const effectiveCompanyId = req.isSupportAccess ? (companyId || undefined) : req.tenantCompanyId;
+    return this.branchesService.findAll(effectiveCompanyId, skip, take, search);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get branch by ID' })
-  findOne(@Param('id') id: string) {
-    return this.branchesService.findOne(id);
+  @ApiOperation({ summary: 'Buscar filial por ID' })
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.branchesService.findOne(id, req.tenantCompanyId);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update branch' })
+  @RequirePermissions('company.edit')
+  @ApiOperation({ summary: 'Atualizar filial' })
   update(
     @Param('id') id: string,
     @Body() updateBranchDto: UpdateBranchDto,
+    @Request() req: any,
   ) {
-    return this.branchesService.update(id, updateBranchDto);
+    return this.branchesService.update(id, updateBranchDto, req.tenantCompanyId);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete branch' })
-  remove(@Param('id') id: string) {
-    return this.branchesService.remove(id);
+  @RequirePermissions('company.edit')
+  @ApiOperation({ summary: 'Excluir filial' })
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.branchesService.remove(id, req.tenantCompanyId);
   }
 }

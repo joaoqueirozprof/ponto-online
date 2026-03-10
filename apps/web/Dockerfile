@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Cache bust to force rebuild
-ARG CACHEBUST=40
+ARG CACHEBUST=41
 
 # Install ALL deps including dev
 COPY apps/web/package.json ./
@@ -18,7 +18,7 @@ COPY apps/web/src/ ./src/
 
 # Set build-time env vars (NEXT_PUBLIC_* must be available at build time)
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_URL=http://72.61.129.78:4010/api/v1
+ENV NEXT_PUBLIC_API_URL=http://72.61.129.78:4020/api/v1
 
 # Build Next.js - log errors for debugging
 RUN npx next build > /tmp/web-build.log 2>&1 && echo "BUILD_OK" || ( \

@@ -5,15 +5,19 @@ import {
   Param,
   UseGuards,
   Body,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AutoSyncService } from './auto-sync.service';
 import { ControlIdService } from './control-id.service';
 
 @ApiTags('Auto Sync')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('auto-sync')
 export class AutoSyncController {
   constructor(
@@ -21,79 +25,80 @@ export class AutoSyncController {
     private readonly controlIdService: ControlIdService,
   ) {}
 
-  // ========== SYNC STATUS ==========
-
   @Get('status')
-  @ApiOperation({ summary: 'Get current sync status and last results' })
+  @RequirePermissions('devices.view')
+  @ApiOperation({ summary: 'Status atual da sincronização' })
   getSyncStatus() {
     return this.autoSyncService.getSyncStatus();
   }
 
-  // ========== PUNCH SYNC ==========
-
   @Post('sync-all')
-  @ApiOperation({ summary: 'Manually trigger sync from all active devices' })
+  @RequirePermissions('devices.edit')
+  @ApiOperation({ summary: 'Sincronizar todos os dispositivos ativos' })
   syncAllDevices() {
     return this.autoSyncService.syncAllDevices();
   }
 
   @Post('sync-device/:deviceId')
-  @ApiOperation({ summary: 'Manually trigger sync from a specific device' })
+  @RequirePermissions('devices.edit')
+  @ApiOperation({ summary: 'Sincronizar dispositivo específico' })
   syncDevice(@Param('deviceId') deviceId: string) {
     return this.autoSyncService.syncDevice(deviceId);
   }
 
-  // ========== EMPLOYEE SYNC ==========
-
   @Post('sync-employees')
-  @ApiOperation({ summary: 'Sync employees bidirectionally with all devices' })
+  @RequirePermissions('employees.edit')
+  @ApiOperation({ summary: 'Sincronizar funcionários com todos os dispositivos' })
   syncAllEmployees() {
     return this.autoSyncService.syncAllEmployees();
   }
 
   @Post('sync-employees/:deviceId')
-  @ApiOperation({ summary: 'Sync employees for a specific device' })
+  @RequirePermissions('employees.edit')
+  @ApiOperation({ summary: 'Sincronizar funcionários de um dispositivo' })
   syncEmployeesForDevice(@Param('deviceId') deviceId: string) {
     return this.autoSyncService.syncEmployeesForDevice(deviceId);
   }
 
-  // ========== RECALCULATION ==========
-
   @Post('recalculate-current')
-  @ApiOperation({ summary: 'Recalculate all timesheets for current month' })
+  @RequirePermissions('timesheets.edit')
+  @ApiOperation({ summary: 'Recalcular folhas do mês atual' })
   recalculateCurrentMonth() {
     return this.autoSyncService.recalculateCurrentMonth();
   }
 
   @Post('recalculate-month')
-  @ApiOperation({ summary: 'Recalculate all timesheets for a specific month/year' })
+  @RequirePermissions('timesheets.edit')
+  @ApiOperation({ summary: 'Recalcular folhas de um mês específico' })
   recalculateMonth(@Body() body: { month: number; year: number }) {
     return this.autoSyncService.recalculateMonth(body.month, body.year);
   }
 
-  // ========== DEVICE COMMUNICATION ==========
-
   @Post('device/:deviceId/ping')
-  @ApiOperation({ summary: 'Check if device is reachable' })
+  @RequirePermissions('devices.view')
+  @ApiOperation({ summary: 'Verificar se dispositivo está acessível' })
   async pingDevice(@Param('deviceId') deviceId: string) {
     const reachable = await this.controlIdService.pingDevice(deviceId);
     return { deviceId, reachable };
   }
 
   @Get('device/:deviceId/info')
-  @ApiOperation({ summary: 'Get device information from Control ID' })
+  @RequirePermissions('devices.view')
+  @ApiOperation({ summary: 'Informações do dispositivo Control ID' })
   getDeviceInfo(@Param('deviceId') deviceId: string) {
     return this.controlIdService.getDeviceInfo(deviceId);
   }
 
   @Get('device/:deviceId/users')
-  @ApiOperation({ summary: 'List users registered on the Control ID device' })
+  @RequirePermissions('devices.view')
+  @ApiOperation({ summary: 'Usuários cadastrados no dispositivo' })
   getDeviceUsers(@Param('deviceId') deviceId: string) {
     return this.controlIdService.loadUsers(deviceId);
   }
 
   @Post('device/:deviceId/create-user')
-  @ApiOperation({ summary: 'Create a user on the Control ID device' })
+  @RequirePermissions('devices.edit')
+  @ApiOperation({ summary: 'Criar usuário no dispositivo Control ID' })
   createDeviceUser(
     @Param('deviceId') deviceId: string,
     @Body() body: { registration: string; name: string; password?: string },
@@ -102,7 +107,8 @@ export class AutoSyncController {
   }
 
   @Post('device/:deviceId/probe')
-  @ApiOperation({ summary: 'Probe device with arbitrary endpoint (debugging)' })
+  @RequirePermissions('admin.all')
+  @ApiOperation({ summary: 'Probe de debug no dispositivo' })
   async probeDevice(
     @Param('deviceId') deviceId: string,
     @Body() body: { endpoint: string; payload?: any },
@@ -111,7 +117,8 @@ export class AutoSyncController {
   }
 
   @Get('device/:deviceId/afd')
-  @ApiOperation({ summary: 'Get raw AFD from Control ID device' })
+  @RequirePermissions('devices.view')
+  @ApiOperation({ summary: 'AFD bruto do dispositivo Control ID' })
   async getDeviceAfd(@Param('deviceId') deviceId: string) {
     const afd = await this.controlIdService.exportAfd(deviceId);
     const records = this.controlIdService.parseAfdRecords(afd);

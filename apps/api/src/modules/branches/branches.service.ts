@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
@@ -7,17 +7,23 @@ import { UpdateBranchDto } from './dto/update-branch.dto';
 export class BranchesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateBranchDto) {
+  async create(dto: CreateBranchDto, companyId?: string) {
     const existingBranch = await this.prisma.branch.findUnique({
       where: { code: dto.code },
     });
 
     if (existingBranch) {
-      throw new BadRequestException('Branch with this code already exists');
+      throw new BadRequestException('Já existe uma filial com este código');
+    }
+
+    // Force company ownership
+    const data: any = { ...dto };
+    if (companyId) {
+      data.companyId = companyId;
     }
 
     return this.prisma.branch.create({
-      data: dto,
+      data,
       include: {
         company: true,
       },
@@ -60,7 +66,7 @@ export class BranchesService {
     return { data, total, skip, take };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, companyId?: string) {
     const branch = await this.prisma.branch.findUnique({
       where: { id },
       include: {
@@ -85,14 +91,18 @@ export class BranchesService {
     });
 
     if (!branch) {
-      throw new NotFoundException(`Branch with ID ${id} not found`);
+      throw new NotFoundException('Filial não encontrada');
+    }
+
+    if (companyId && branch.companyId !== companyId) {
+      throw new ForbiddenException('Acesso negado a esta filial');
     }
 
     return branch;
   }
 
-  async update(id: string, dto: UpdateBranchDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateBranchDto, companyId?: string) {
+    await this.findOne(id, companyId);
 
     if (dto.code) {
       const existingBranch = await this.prisma.branch.findUnique({
@@ -100,7 +110,7 @@ export class BranchesService {
       });
 
       if (existingBranch && existingBranch.id !== id) {
-        throw new BadRequestException('Branch with this code already exists');
+        throw new BadRequestException('Já existe uma filial com este código');
       }
     }
 
@@ -113,8 +123,8 @@ export class BranchesService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, companyId?: string) {
+    await this.findOne(id, companyId);
 
     return this.prisma.branch.delete({
       where: { id },

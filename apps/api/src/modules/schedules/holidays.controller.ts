@@ -8,32 +8,39 @@ import {
   Delete,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { HolidaysService } from './holidays.service';
 
 @ApiTags('Holidays')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('holidays')
 export class HolidaysController {
   constructor(private readonly holidaysService: HolidaysService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new holiday' })
+  @RequirePermissions('schedules.create')
+  @ApiOperation({ summary: 'Criar feriado' })
   create(@Body() createHolidayDto: any) {
     return this.holidaysService.create(createHolidayDto);
   }
 
   @Post('seed-national')
-  @ApiOperation({ summary: 'Seed Brazilian national holidays for a given year' })
+  @RequirePermissions('schedules.create')
+  @ApiOperation({ summary: 'Importar feriados nacionais brasileiros' })
   seedNational(@Body('year') year: number) {
     return this.holidaysService.seedNationalHolidays(year || new Date().getFullYear());
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all holidays' })
+  @RequirePermissions('schedules.view')
+  @ApiOperation({ summary: 'Listar feriados' })
   findAll(
     @Query('branchId') branchId?: string,
     @Query('skip') skip: number = 0,
@@ -45,19 +52,22 @@ export class HolidaysController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get holiday by ID' })
+  @RequirePermissions('schedules.view')
+  @ApiOperation({ summary: 'Buscar feriado por ID' })
   findOne(@Param('id') id: string) {
     return this.holidaysService.findOne(id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update holiday' })
+  @RequirePermissions('schedules.edit')
+  @ApiOperation({ summary: 'Atualizar feriado' })
   update(@Param('id') id: string, @Body() updateHolidayDto: any) {
     return this.holidaysService.update(id, updateHolidayDto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete holiday' })
+  @RequirePermissions('schedules.delete')
+  @ApiOperation({ summary: 'Excluir feriado' })
   remove(@Param('id') id: string) {
     return this.holidaysService.remove(id);
   }

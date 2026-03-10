@@ -8,56 +8,67 @@ import {
   Delete,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 
 @ApiTags('Employees')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('employees')
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new employee' })
-  create(@Body() createEmployeeDto: CreateEmployeeDto) {
-    return this.employeesService.create(createEmployeeDto);
+  @RequirePermissions('employees.create')
+  @ApiOperation({ summary: 'Criar novo funcionário' })
+  create(@Body() createEmployeeDto: CreateEmployeeDto, @Request() req: any) {
+    return this.employeesService.create(createEmployeeDto, req.tenantCompanyId);
   }
 
   @Get()
-  @ApiOperation({ summary: 'List employees with filtering and pagination' })
+  @RequirePermissions('employees.view')
+  @ApiOperation({ summary: 'Listar funcionários com filtros e paginação' })
   findAll(
+    @Request() req: any,
     @Query('branchId') branchId?: string,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 10,
     @Query('isActive') isActive?: boolean,
     @Query('search') search?: string,
   ) {
-    return this.employeesService.findAll(branchId, skip, take, isActive, search);
+    return this.employeesService.findAll(req.tenantCompanyId, branchId, skip, take, isActive, search);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get employee by ID' })
-  findOne(@Param('id') id: string) {
-    return this.employeesService.findOne(id);
+  @RequirePermissions('employees.view')
+  @ApiOperation({ summary: 'Buscar funcionário por ID' })
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.employeesService.findOne(id, req.tenantCompanyId);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update employee' })
+  @RequirePermissions('employees.edit')
+  @ApiOperation({ summary: 'Atualizar funcionário' })
   update(
     @Param('id') id: string,
     @Body() updateEmployeeDto: UpdateEmployeeDto,
+    @Request() req: any,
   ) {
-    return this.employeesService.update(id, updateEmployeeDto);
+    return this.employeesService.update(id, updateEmployeeDto, req.tenantCompanyId);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete employee' })
-  remove(@Param('id') id: string) {
-    return this.employeesService.remove(id);
+  @RequirePermissions('employees.delete')
+  @ApiOperation({ summary: 'Excluir funcionário' })
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.employeesService.remove(id, req.tenantCompanyId);
   }
 }

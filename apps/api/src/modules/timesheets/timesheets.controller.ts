@@ -8,27 +8,33 @@ import {
   Query,
   Body,
   Req,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TimesheetsService } from './timesheets.service';
 
 @ApiTags('Timesheets')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('timesheets')
 export class TimesheetsController {
   constructor(private readonly timesheetsService: TimesheetsService) {}
 
   @Get('build-version')
-  @ApiOperation({ summary: 'Get build version' })
+  @ApiOperation({ summary: 'Versão do build' })
   getBuildVersion() {
-    return { version: 'build-45-punchesByDate', timestamp: new Date().toISOString() };
+    return { version: 'build-80-multitenant', timestamp: new Date().toISOString() };
   }
 
   @Get()
-  @ApiOperation({ summary: 'List timesheets' })
+  @RequirePermissions('timesheets.view')
+  @ApiOperation({ summary: 'Listar folhas de ponto' })
   listTimesheets(
+    @Request() req: any,
     @Query('branchId') branchId?: string,
     @Query('month') month?: number,
     @Query('year') year?: number,
@@ -37,11 +43,12 @@ export class TimesheetsController {
     @Query('take') take: number = 10,
     @Query('search') search?: string,
   ) {
-    return this.timesheetsService.listTimesheets(branchId, skip, take, search, month, year, status);
+    return this.timesheetsService.listTimesheets(branchId, skip, take, search, month, year, status, req.tenantCompanyId);
   }
 
   @Get(':employeeId/:month/:year')
-  @ApiOperation({ summary: 'Get timesheet for employee and period' })
+  @RequirePermissions('timesheets.view')
+  @ApiOperation({ summary: 'Buscar folha de ponto do funcionário' })
   getTimesheet(
     @Param('employeeId') employeeId: string,
     @Param('month') month: number,
@@ -51,7 +58,8 @@ export class TimesheetsController {
   }
 
   @Post('calculate/:employeeId/:month/:year')
-  @ApiOperation({ summary: 'Calculate timesheet for an employee' })
+  @RequirePermissions('timesheets.edit')
+  @ApiOperation({ summary: 'Calcular folha de ponto do funcionário' })
   calculateTimesheet(
     @Param('employeeId') employeeId: string,
     @Param('month') month: number,
@@ -61,7 +69,8 @@ export class TimesheetsController {
   }
 
   @Post('calculate-batch')
-  @ApiOperation({ summary: 'Calculate timesheets for all employees in a period' })
+  @RequirePermissions('timesheets.edit')
+  @ApiOperation({ summary: 'Calcular folhas de ponto em lote' })
   calculateBatch(
     @Body('month') month: number,
     @Body('year') year: number,
@@ -71,7 +80,8 @@ export class TimesheetsController {
   }
 
   @Patch(':id/status')
-  @ApiOperation({ summary: 'Update timesheet status' })
+  @RequirePermissions('timesheets.edit')
+  @ApiOperation({ summary: 'Atualizar status da folha de ponto' })
   updateStatus(
     @Param('id') id: string,
     @Body('status') status: string,
@@ -80,7 +90,8 @@ export class TimesheetsController {
   }
 
   @Post('batch-approve')
-  @ApiOperation({ summary: 'Approve multiple timesheets at once' })
+  @RequirePermissions('timesheets.approve')
+  @ApiOperation({ summary: 'Aprovar múltiplas folhas de ponto' })
   batchApprove(
     @Body('ids') ids: string[],
     @Req() req: any,
@@ -90,7 +101,8 @@ export class TimesheetsController {
   }
 
   @Patch(':id/approve')
-  @ApiOperation({ summary: 'Approve timesheet' })
+  @RequirePermissions('timesheets.approve')
+  @ApiOperation({ summary: 'Aprovar folha de ponto' })
   approve(
     @Param('id') id: string,
     @Req() req: any,
@@ -100,7 +112,8 @@ export class TimesheetsController {
   }
 
   @Get(':employeeId/balance/:month/:year')
-  @ApiOperation({ summary: 'Get time balance for employee' })
+  @RequirePermissions('timesheets.view')
+  @ApiOperation({ summary: 'Saldo de horas do funcionário' })
   getTimeBalance(
     @Param('employeeId') employeeId: string,
     @Param('month') month: number,

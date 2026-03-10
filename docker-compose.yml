@@ -1,135 +1,112 @@
 services:
-  ponto-db:
+  ponto-v2-db:
     image: postgres:16-alpine
-    container_name: ponto-db
+    container_name: ponto-v2-db
     restart: always
     environment:
-      POSTGRES_DB: "ponto_online"
+      POSTGRES_DB: "ponto_v2"
       POSTGRES_USER: "ponto_admin"
-      POSTGRES_PASSWORD: "PontoSecure2026"
+      POSTGRES_PASSWORD: "PontoV2Secure2026"
     volumes:
-      - ponto-pgdata:/var/lib/postgresql/data
+      - ponto-v2-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ponto_admin -d ponto_online"]
+      test: ["CMD-SHELL", "pg_isready -U ponto_admin -d ponto_v2"]
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
-      - ponto-network
+      - ponto-v2-network
 
-  ponto-redis:
+  ponto-v2-redis:
     image: redis:7-alpine
-    container_name: ponto-redis
+    container_name: ponto-v2-redis
     restart: always
     command: redis-server --appendonly yes
     volumes:
-      - ponto-redis-data:/data
+      - ponto-v2-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
-      - ponto-network
+      - ponto-v2-network
 
-  ponto-api:
+  ponto-v2-api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        CACHEBUST: "80"
-    image: ponto-api:v80
-    container_name: ponto-api
+        CACHEBUST: "81"
+    image: ponto-v2-api:v81
+    container_name: ponto-v2-api
     restart: always
     ports:
-      - "4010:4010"
+      - "4020:4010"
     environment:
       NODE_ENV: "production"
       API_PORT: "4010"
       API_HOST: "0.0.0.0"
-      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
-      REDIS_URL: "redis://ponto-redis:6379"
-      JWT_SECRET: "ponto-jwt-secret-2026-prod"
-      JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-prod"
-      CORS_ORIGIN: "http://72.61.129.78:3010"
-      # TLS legado: habilita TLS 1.0/1.1 e cifras antigas para Control iD firmware antigo
-      # OPENSSL_CONF aponta para config com MinProtocol=TLSv1 e SECLEVEL=0 (legacy ciphers)
+      DATABASE_URL: "postgresql://ponto_admin:PontoV2Secure2026@ponto-v2-db:5432/ponto_v2"
+      REDIS_URL: "redis://ponto-v2-redis:6379"
+      JWT_SECRET: "ponto-jwt-secret-2026-v2-test"
+      JWT_REFRESH_SECRET: "ponto-refresh-secret-2026-v2-test"
+      CORS_ORIGIN: "http://72.61.129.78:3020"
       OPENSSL_CONF: "/app/openssl_legacy.cnf"
       NODE_OPTIONS: "--tls-min-v1.0"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       OPENAI_KEY_B64: "c2stcHJvai1JbnlFLWJuYzJjTktOWTdQc3pyRS1TUGJXa2JQcmRicGtVMGY5ZC1vcU9FRkllbWZiQ0UxbnpWNnBMYUVRQ2VXSnQ2U0d3dm0xWlQzQmxia0ZKY2h6cWxORG03cWF2aG95RUhUdzRrWEZIQUZPMUpSdFlFQkNCUkZJUEF1Y0s2VjJMWnRNQ2lySzVTUjUtLWc2R1ppeEd6UnV5QUE="
     depends_on:
-      ponto-db:
+      ponto-v2-db:
         condition: service_healthy
-      ponto-redis:
+      ponto-v2-redis:
         condition: service_healthy
     networks:
-      - ponto-network
+      - ponto-v2-network
 
-  ponto-worker:
+  ponto-v2-worker:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
-    container_name: ponto-worker
+    container_name: ponto-v2-worker
     restart: always
     environment:
       NODE_ENV: "production"
-      DATABASE_URL: "postgresql://ponto_admin:PontoSecure2026@ponto-db:5432/ponto_online"
-      REDIS_URL: "redis://ponto-redis:6379"
+      DATABASE_URL: "postgresql://ponto_admin:PontoV2Secure2026@ponto-v2-db:5432/ponto_v2"
+      REDIS_URL: "redis://ponto-v2-redis:6379"
     depends_on:
-      ponto-db:
+      ponto-v2-db:
         condition: service_healthy
-      ponto-redis:
+      ponto-v2-redis:
         condition: service_healthy
     networks:
-      - ponto-network
+      - ponto-v2-network
 
-  ponto-migrate:
-    image: postgres:16-alpine
-    container_name: ponto-migrate
-    restart: "no"
-    volumes:
-      - ./scripts/migrate-employee-punches.sql:/migration.sql:ro
-    environment:
-      PGPASSWORD: "PontoSecure2026"
-    entrypoint: >
-      sh -c "
-        echo '=== Starting Employee Punch Migration ===' &&
-        psql -h ponto-db -U ponto_admin -d ponto_online -f /migration.sql 2>&1 &&
-        echo '=== Migration Complete ===' ||
-        echo '=== Migration FAILED ==='
-      "
-    depends_on:
-      ponto-db:
-        condition: service_healthy
-    networks:
-      - ponto-network
-
-  ponto-web:
+  ponto-v2-web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        CACHEBUST: "40"
-    image: ponto-web:v40
-    container_name: ponto-web
+        CACHEBUST: "41"
+    image: ponto-v2-web:v41
+    container_name: ponto-v2-web
     restart: always
     ports:
-      - "3010:3000"
+      - "3020:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://72.61.129.78:4010/api/v1"
+      NEXT_PUBLIC_API_URL: "http://72.61.129.78:4020/api/v1"
     depends_on:
-      - ponto-api
+      - ponto-v2-api
     networks:
-      - ponto-network
+      - ponto-v2-network
 
 volumes:
-  ponto-pgdata:
-    name: ponto-pgdata
-  ponto-redis-data:
-    name: ponto-redis-data
+  ponto-v2-pgdata:
+    name: ponto-v2-pgdata
+  ponto-v2-redis-data:
+    name: ponto-v2-redis-data
 
 networks:
-  ponto-network:
-    name: ponto-online-network
+  ponto-v2-network:
+    name: ponto-v2-network
     driver: bridge
