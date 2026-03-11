@@ -182,14 +182,19 @@ export class AutoSyncService {
       orderBy: { punchTime: 'desc' },
     });
 
-    // Use date-based initial_date as primary incremental filter.
-    // NSR-based filtering is unreliable: the device's internal NSR range
-    // may not match what we stored (e.g. device was reset, or NSR from
-    // a different source was used). Date-based filtering always works.
-    let initialNsr: number | undefined; // intentionally not used — kept for reference
+    // For REP iDClass devices, we must use initial_nsr to incrementally fetch data
+    // otherwise generating a full AFD for the day results in timeouts (120s+).
+    let initialNsr: number | undefined;
+    if (lastRecord?.rawData && typeof lastRecord.rawData === 'object') {
+      const raw = lastRecord.rawData as any;
+      if (raw.nsr) {
+        initialNsr = parseInt(raw.nsr, 10);
+      }
+    }
+    
     let initialDate: { day: number; month: number; year: number } | undefined;
 
-    if (lastSync?.finishedAt) {
+    if (lastSync?.finishedAt && !initialNsr) {
       // Start from the last sync date (subtract 1 day as safety margin)
       const d = new Date(lastSync.finishedAt.getTime() - 24 * 3600 * 1000);
       initialDate = {
@@ -197,7 +202,7 @@ export class AutoSyncService {
         month: d.getUTCMonth() + 1,
         year: d.getUTCFullYear(),
       };
-    } else {
+    } else if (!initialNsr) {
       // No previous sync — start from beginning of current month
       const now = new Date();
       initialDate = {
@@ -222,11 +227,13 @@ export class AutoSyncService {
       records = this.controlId.parseAfdRecords(afdText);
       this.logger.log(`Parsed ${records.length} AFD records from device ${device.name}`);
 
-      // ALWAYS also check access_logs as supplemental source.
-      // Control ID iDClass devices store current-day punches ONLY in access_logs,
-      // while AFD contains only historical/legacy data. We merge both sources
-      // and the deduplication logic downstream handles overlaps.
-      useAccessLogs = true;
+      // We only use access_logs if we suspect the device requires it. 
+      // REP iDClass devices (usually have "REP" in name) use pure AFD and block load_objects.fcgi with 400.
+      if (!device.name.toLowerCase().includes('rep')) {
+        useAccessLogs = true;
+      } else {
+        this.logger.log(`Device ${device.name} is a REP device. Skipping access_logs fallback to avoid Invalid Command 400 errors.`);
+      }
     } catch (afdError: any) {
       if (
         afdError.message?.includes('400') ||
@@ -302,9 +309,13 @@ export class AutoSyncService {
         // Deduplication happens downstream when checking existing rawPunchEvents.
         records = [...records, ...accessRecords];
       } catch (accessError: any) {
-        this.logger.error(
-          `Failed to fetch access_logs from device ${device.name}: ${accessError.message}`,
-        );
+        if (accessError.message?.includes('400')) {
+          this.logger.warn(`Device ${device.name} returned 400 on access_logs (unsupported). Skipping access_logs.`);
+        } else {
+          this.logger.error(
+            `Failed to fetch access_logs from device ${device.name}: ${accessError.message}`,
+          );
+        }
         // If access_logs fails, we still keep whatever AFD records we have
         this.logger.warn(
           `Continuing with ${records.length} AFD-only records for device ${device.name}`,
