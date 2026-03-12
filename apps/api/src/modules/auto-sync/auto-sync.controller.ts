@@ -57,6 +57,14 @@ export class AutoSyncController {
     return this.autoSyncService.syncEmployeesForDevice(deviceId);
   }
 
+  // ========== REPAIR AND MAINTENANCE ==========
+
+  @Post('repair-unmatched')
+  @ApiOperation({ summary: 'Attempt to attach orphan punch events to users based on updated PIS' })
+  repairUnmatchedPunches() {
+    return this.autoSyncService.repairUnmatchedPunches();
+  }
+
   // ========== RECALCULATION ==========
 
   @Post('recalculate-current')

@@ -320,6 +320,28 @@ export default function PunchesPage() {
     }
   };
 
+  const handleRepairUnmatched = async () => {
+    if (!window.confirm('Isso tentará vincular todas as batidas órfãs do banco de dados (sem funcionário) aos funcionários baseando-se no PIS/PASEP recentemente atualizado. Deseja continuar?')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      showToast('Vinculando batidas, isso pode demorar um pouco...', 'info');
+      const { data } = await apiClient.post('/auto-sync/repair-unmatched');
+      showToast(`${data.repaired} batidas foram vinculadas a funcionários com sucesso!`, 'success');
+      if (activeTab === 'raw') fetchRawPunches();
+      else if (activeTab === 'normalized') {
+        if (viewMode === 'individual') fetchNormalizedPunches();
+        else fetchGroupedPunches();
+      }
+      fetchSummary();
+    } catch (err: any) {
+      showToast(err?.response?.data?.message || 'Erro ao vincular batidas de ponto', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchGroupedPunches = async () => {
     try {
       setLoading(true);
@@ -719,15 +741,28 @@ export default function PunchesPage() {
             <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Registros de Ponto</h1>
             <p className="text-base text-slate-600 dark:text-slate-400">Visualize e gerencie todos os registros de ponto</p>
           </div>
-          <button
-            onClick={() => setShowManualModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg font-medium text-sm"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            Registro Manual
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={handleRepairUnmatched}
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors shadow-sm font-medium text-sm disabled:opacity-50"
+              title="Vincular batidas antigas que vieram do relógio sem PIS cadastrado"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              Vincular Batidas Pendentes
+            </button>
+            <button
+              onClick={() => setShowManualModal(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md font-medium text-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Registro Manual
+            </button>
+          </div>
         </div>
 
         {/* Summary Cards */}
