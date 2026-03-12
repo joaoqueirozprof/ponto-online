@@ -1154,7 +1154,8 @@ export default function OvertimePage() {
   const branchName = branches.find(b => b.id === selectedBranch)?.name || '';
 
   return (
-    <div className="space-y-6 print:space-y-4">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6 print:space-y-4">
       {/* Modal */}
       {modalEmp && (
         <PunchDetailModal
@@ -1167,10 +1168,10 @@ export default function OvertimePage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between print:hidden">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Horas Extras</h1>
-          <p className="text-slate-500 mt-1">Relatório transparente — horas extras com dedução de faltas e atrasos</p>
+          <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600 dark:from-indigo-400 dark:to-violet-400 tracking-tight">Horas Extras</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium text-sm md:text-base">Gestão de banco de horas com transparência e deduções de faltas e atrasos</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {fetched && (
@@ -1211,8 +1212,13 @@ export default function OvertimePage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 print:hidden">
-        <h2 className="text-sm font-semibold text-slate-700 mb-4">Filtros</h2>
+      <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/70 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] p-6 print:hidden">
+        <h2 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-5 flex items-center gap-2">
+          <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+          </svg>
+          Opções de Filtragem
+        </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Filial</label>
@@ -1322,11 +1328,12 @@ export default function OvertimePage() {
           ))}
         </div>
 
-        <button
-          onClick={fetchReport}
-          disabled={loading || !selectedBranch}
-          className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
+        <div className="mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 flexjustify-end">
+          <button
+            onClick={fetchReport}
+            disabled={loading || !selectedBranch}
+            className="flex items-center justify-center gap-2 px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-bold rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-md transition-all duration-200 w-full md:w-auto"
+          >
           {loading ? (
             <>
               <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -1344,6 +1351,7 @@ export default function OvertimePage() {
             </>
           )}
         </button>
+      </div>
 
         {errorDetail && <p className="text-xs text-red-500 mt-2">{errorDetail}</p>}
       </div>
@@ -1359,8 +1367,9 @@ export default function OvertimePage() {
       {fetched && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 md:gap-5">
+            <div className="bg-white/80 backdrop-blur-xl dark:bg-slate-900/80 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm p-5 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform duration-300">👥</div>
               <p className="text-xs text-slate-500 mb-1">Funcionários</p>
               <p className="text-2xl font-bold text-slate-900">{data.length}</p>
               <p className="text-xs text-slate-400 mt-0.5">{withPunches} com ponto · {noPunch} sem</p>
@@ -1373,16 +1382,18 @@ export default function OvertimePage() {
             <div className="bg-white rounded-xl border border-red-200 p-4">
               <p className="text-xs text-red-500 mb-1">Faltas/Déficit</p>
               <p className="text-2xl font-bold text-red-600 font-mono">-{fmtHHMM(totalAbsence)}</p>
-              <p className="text-xs text-red-400 mt-0.5">a descontar</p>
+              <p className="text-xs text-red-400 mt-1 font-medium">a descontar</p>
             </div>
-            <div className="bg-white rounded-xl border-2 border-amber-300 p-4">
-              <p className="text-xs text-amber-600 mb-1 font-semibold">H. Extras Líquidas</p>
-              <p className="text-2xl font-bold text-amber-700 font-mono">{fmtHHMM(totalNetOT)}</p>
-              <p className="text-xs text-amber-500 mt-0.5">a pagar</p>
+            <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl border border-amber-300/50 dark:border-amber-700/50 shadow-sm p-5 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-20 text-amver-600 group-hover:scale-110 transition-transform duration-300">💰</div>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mb-2 font-bold uppercase tracking-wider">Líquidas</p>
+              <p className="text-2xl lg:text-3xl font-black text-amber-700 dark:text-amber-500 font-mono tracking-tight">{fmtHHMM(totalNetOT)}</p>
+              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1 font-medium">a pagar</p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 mb-1">Total Trabalhadas</p>
-              <p className="text-2xl font-bold text-slate-900 font-mono">{fmtHHMM(totalWorked)}</p>
+            <div className="bg-white/80 backdrop-blur-xl dark:bg-slate-900/80 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm p-5 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform duration-300">⏱️</div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2 font-bold uppercase tracking-wider">Trabalhadas</p>
+              <p className="text-2xl font-black text-slate-900 dark:text-white font-mono tracking-tight">{fmtHHMM(totalWorked)}</p>
               <p className="text-xs text-slate-400 mt-0.5">{monthLabel}/{year}</p>
             </div>
           </div>
@@ -1403,9 +1414,9 @@ export default function OvertimePage() {
           </div>
 
           {/* Table */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">
+          <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/70 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200/50 dark:border-slate-800/50 flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-800/50">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200">
                 {branchName} — {monthLabel}/{year}
               </h2>
               <div className="flex items-center gap-3">
@@ -1520,7 +1531,7 @@ export default function OvertimePage() {
                           <td className="px-4 py-3 text-center">
                             <button
                               onClick={() => setModalEmp(item)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-800/60 transition-all border border-transparent hover:border-indigo-200 dark:hover:border-indigo-700"
                               title="Ver batidas e ajustar"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1568,16 +1579,17 @@ export default function OvertimePage() {
       )}
 
       {!fetched && !loading && (
-        <div className="bg-white rounded-xl border border-dashed border-slate-200 p-16 text-center">
-          <div className="w-14 h-14 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/70 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-16 text-center">
+          <div className="w-14 h-14 bg-indigo-50 dark:bg-indigo-900/40 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
-          <p className="text-slate-500 font-medium">Selecione a filial, mês e ano</p>
-          <p className="text-slate-400 text-sm mt-1">Depois clique em &quot;Gerar Relatório&quot; para ver as horas extras</p>
+          <p className="text-slate-600 dark:text-slate-300 font-bold text-lg">Selecione a filial, mês e ano</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Depois clique em &quot;Gerar Relatório&quot; para ver as horas extras com a nova interface otimizada</p>
         </div>
       )}
+    </div>
     </div>
   );
 }
