@@ -298,29 +298,43 @@ export class ControlIdService {
    * Export AFD (Arquivo Fonte de Dados) from device via get_afd.fcgi.
    *
    * The correct endpoint is get_afd.fcgi (NOT export_afd.fcgi).
-   * The initial_nsr field goes INSIDE the initial_date object (confirmed via Control iD Python SDK).
    *
-   * Request body format:
-   *   { "initial_date": { "day": 1, "month": 1, "year": 2020, "initial_nsr": 0 } }
+   * IMPORTANT: For iDClass REP firmware, initial_nsr must be a ROOT-LEVEL field
+   * in the JSON body, NOT nested inside initial_date. When nested, the firmware
+   * ignores it and generates the full AFD file (causing timeouts).
    *
-   * Always sends at least { "initial_date": {...} } — Control iD devices return 400
-   * when Content-Type: application/json is present but the body is empty or malformed.
+   * Tested directly on device 2026-03-12:
+   *   { "initial_nsr": 241960 }                    → 46 records in 2s  ✓
+   *   { "initial_date": {..., "initial_nsr": ...} } → timeout 120s     ✗
+   *   { "initial_date": { "day":12,"month":3,"year":2026 } } → 215 records in 45s ✓
    */
   async exportAfd(deviceId: string, initialDate?: { day: number; month: number; year: number }, initialNsr?: number): Promise<string> {
-    // Build initial_date with defaults (epoch start = get all records)
-    const dateObj = initialDate || { day: 1, month: 1, year: 2020 };
-    const body: any = {
-      initial_date: {
-        day: dateObj.day,
-        month: dateObj.month,
-        year: dateObj.year,
-        initial_nsr: initialNsr ?? 0,  // initial_nsr goes INSIDE initial_date
-      },
-    };
+    const body: any = {};
+
+    if (initialNsr !== undefined && initialNsr > 0) {
+      // Incremental sync: use initial_nsr as ROOT-LEVEL field (fast, ~2s)
+      body.initial_nsr = initialNsr;
+    } else if (initialDate) {
+      // Date-based sync: use initial_date (slower but gets all records from date)
+      body.initial_date = {
+        day: initialDate.day,
+        month: initialDate.month,
+        year: initialDate.year,
+      };
+    } else {
+      // Fallback: get today's records
+      const now = new Date();
+      body.initial_date = {
+        day: now.getDate(),
+        month: now.getMonth() + 1,
+        year: now.getFullYear(),
+      };
+    }
 
     this.logger.log(`exportAfd: calling get_afd.fcgi with body=${JSON.stringify(body)}`);
-    // AFD generation can take up to 2 minutes for large files — use extended timeout
-    const afdText = await this.request(deviceId, 'get_afd.fcgi', body, undefined, 120000);
+    // Incremental (NSR) is fast (~2s), date-based can take 30-60s
+    const timeoutMs = body.initial_nsr ? 30000 : 120000;
+    const afdText = await this.request(deviceId, 'get_afd.fcgi', body, undefined, timeoutMs);
     return typeof afdText === 'string' ? afdText : JSON.stringify(afdText);
   }
 
