@@ -32,11 +32,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  // Authenticated: show sidebar + content
+// Authenticated: show sidebar + content
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen relative bg-slate-50 overflow-hidden">
+      {/* Background Decorators */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-400/10 blur-[120px] pointer-events-none" />
+      <div className="absolute top-[20%] right-[-5%] w-[30%] h-[30%] rounded-full bg-blue-400/10 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] left-[20%] w-[35%] h-[35%] rounded-full bg-purple-400/10 blur-[120px] pointer-events-none" />
+      
       <Sidebar />
-      <main className="flex-1 ml-64">
+      <main className="flex-1 ml-64 relative z-10">
         <div className="p-6 lg:p-8 max-w-7xl mx-auto">
           {children}
         </div>

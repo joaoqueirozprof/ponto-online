@@ -359,30 +359,38 @@ export default function DashboardPage() {
   };
 
   const quickLinks = [
-    { label: 'Colaboradores', href: '/employees', desc: 'Gerenciar equipe' },
-    { label: 'Registros', href: '/punches', desc: 'Ver batidas' },
-    { label: 'Horas Extras', href: '/overtime', desc: 'Relatório rápido RH' },
-    { label: 'Relatorios', href: '/reports', desc: 'Gerar relatorios' },
-    { label: 'Escalas', href: '/schedules', desc: 'Horarios de trabalho' },
-    { label: 'Folhas de Ponto', href: '/timesheets', desc: 'Controle mensal' },
+    { label: 'Colaboradores', href: '/employees', desc: 'Gerenciar equipe', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', color: 'text-indigo-500' },
+    { label: 'Registros', href: '/punches', desc: 'Ver batidas', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', color: 'text-violet-500' },
+    { label: 'Horas Extras', href: '/overtime', desc: 'Relatório rápido RH', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', color: 'text-emerald-500' },
+    { label: 'Relatórios', href: '/reports', desc: 'Gerar relatórios', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', color: 'text-blue-500' },
+    { label: 'Escalas', href: '/schedules', desc: 'Horários de trabalho', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', color: 'text-amber-500' },
+    { label: 'Folhas de Ponto', href: '/timesheets', desc: 'Controle mensal', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', color: 'text-teal-500' },
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            {greeting}, {user?.name?.split(' ')[0] || 'Usuario'}
-          </h1>
-          <p className="text-slate-500 mt-1">Resumo do sistema de ponto</p>
-        </div>
-        <div className="text-right hidden sm:block">
-          <div className="text-2xl font-bold text-slate-900 tabular-nums font-mono">
-            {currentTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+    <div className="space-y-8 animate-in fade-in duration-500 slide-in-from-bottom-4">
+      {/* Header Premium */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-8 mb-6 text-white shadow-2xl border border-white/10">
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 mix-blend-overlay"></div>
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 rounded-full bg-indigo-500/20 blur-[80px]"></div>
+        <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 rounded-full bg-purple-500/20 blur-[80px]"></div>
+        
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
+              {greeting}, <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">{user?.name?.split(' ')[0] || 'Usuário'}</span>
+            </h1>
+            <p className="text-slate-300 mt-2 font-medium max-w-lg">
+              Bem-vindo ao centro de controle do seu sistema de gestão de ponto eletrônico.
+            </p>
           </div>
-          <div className="text-sm text-slate-500 mt-0.5">
-            {currentTime.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+          <div className="text-left md:text-right bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-inner">
+            <div className="text-2xl font-bold text-white tabular-nums font-mono">
+              {currentTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </div>
+            <div className="text-sm text-indigo-200 mt-1 font-medium">
+              {currentTime.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())}
+            </div>
           </div>
         </div>
       </div>
@@ -445,7 +453,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Stats Grid */}
+      {/* Stats Grid - Glassmorphism */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {statCards.map((stat) => {
           const colors = colorMap[stat.color];
@@ -453,48 +461,68 @@ export default function DashboardPage() {
             <Link
               key={stat.label}
               href={stat.href}
-              className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md hover:border-slate-300 transition-all duration-200 group"
+              className="bg-white/80 backdrop-blur-xl border border-white/80 rounded-2xl p-5 shadow-lg shadow-slate-200/50 hover:shadow-xl hover:-translate-y-1 hover:bg-white transition-all duration-300 group"
             >
-              <div className="flex items-center justify-between mb-3">
-                <div className={`w-10 h-10 ${colors.iconBg} rounded-lg flex items-center justify-center ${colors.text}`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-12 h-12 ${colors.iconBg} rounded-xl flex items-center justify-center ${colors.text} shadow-inner group-hover:scale-110 transition-transform duration-300`}>
                   {stat.icon}
                 </div>
-                <svg className="w-4 h-4 text-slate-300 group-hover:text-slate-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                <svg className="w-5 h-5 text-slate-300 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
-              <div className="text-2xl font-bold text-slate-900">
+              <div className="text-3xl font-black text-slate-800 tracking-tight">
                 {statsLoading ? (
-                  <div className="h-7 w-12 bg-slate-200 rounded animate-pulse" />
+                  <div className="h-9 w-16 bg-slate-200 rounded-lg animate-pulse" />
                 ) : (
                   stat.value
                 )}
               </div>
-              <div className="text-sm text-slate-500 mt-0.5">{stat.label}</div>
+              <div className="text-sm font-semibold text-slate-500 mt-1">{stat.label}</div>
             </Link>
           );
         })}
       </div>
 
-      {/* Weekly Chart */}
+      {/* Weekly Chart Premium */}
       {weekData.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-4">Registros dos Últimos 7 Dias</h2>
-          <div className="flex items-end justify-between gap-2" style={{ height: '160px' }}>
+        <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-slate-800">Registros dos Últimos 7 Dias</h2>
+            <div className="p-2 bg-indigo-50 rounded-lg">
+              <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+              </svg>
+            </div>
+          </div>
+          <div className="flex items-end justify-between gap-3 sm:gap-4 relative" style={{ height: '180px' }}>
+            {/* Guide lines */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+              <div className="w-full border-t border-slate-200/50"></div>
+              <div className="w-full border-t border-slate-200/50"></div>
+              <div className="w-full border-t border-slate-200/50"></div>
+              <div className="w-full border-t border-slate-200/50"></div>
+            </div>
+            
             {weekData.map((day, i) => {
               const maxCount = Math.max(...weekData.map((d) => d.count), 1);
-              const heightPct = Math.max((day.count / maxCount) * 100, 4);
+              const heightPct = Math.max((day.count / maxCount) * 100, 6);
               return (
-                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                  <div className="text-xs font-semibold text-slate-600 mb-1">{day.count || ''}</div>
+                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full relative z-10 group cursor-default">
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 bg-slate-800 text-white text-xs font-bold py-1 px-2 rounded-md whitespace-nowrap shadow-lg">
+                    {day.count} batidas
+                  </div>
+                  <div className="text-sm font-bold text-slate-700 mb-1.5">{day.count > 0 ? day.count : ''}</div>
                   <div
-                    className={`w-full max-w-[40px] rounded-t-md transition-all duration-500 ${day.isToday ? 'bg-indigo-500' : 'bg-indigo-200'}`}
+                    className={`w-full max-w-[48px] rounded-t-xl transition-all duration-700 ease-out shadow-inner relative overflow-hidden ${day.isToday ? 'bg-gradient-to-t from-indigo-500 to-indigo-400' : 'bg-gradient-to-t from-indigo-200 to-indigo-100 hover:from-indigo-300 hover:to-indigo-200'}`}
                     style={{ height: `${heightPct}%` }}
-                  />
-                  <div className={`text-xs mt-2 ${day.isToday ? 'font-bold text-indigo-600' : 'text-slate-400'}`}>
+                  >
+                    {day.isToday && <div className="absolute top-0 left-0 right-0 h-2 bg-white/20"></div>}
+                  </div>
+                  <div className={`text-sm mt-3 ${day.isToday ? 'font-black text-indigo-600' : 'font-semibold text-slate-500'}`}>
                     {day.label}
                   </div>
-                  <div className={`text-[10px] ${day.isToday ? 'text-indigo-500' : 'text-slate-300'}`}>
+                  <div className={`text-[10px] font-medium ${day.isToday ? 'text-indigo-400' : 'text-slate-400'}`}>
                     {day.date}
                   </div>
                 </div>
@@ -543,21 +571,27 @@ export default function DashboardPage() {
         {/* Quick Links + Status */}
         <div className="space-y-6">
           {/* Quick Links */}
-          <div className="bg-white rounded-xl border border-slate-200 p-5">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4">Acesso Rapido</h2>
-            <div className="space-y-2">
-              {quickLinks.map((link) => (
+          <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
+            <h2 className="text-lg font-bold text-slate-800 mb-5">Acesso Rápido</h2>
+            <div className="space-y-3">
+              {quickLinks.map((link, idx) => (
                 <Link
                   key={link.label}
                   href={link.href}
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 transition-colors border border-slate-100 group"
+                  className="flex items-center gap-4 p-3 rounded-xl hover:bg-white border border-transparent hover:border-slate-100 transition-all duration-200 group shadow-sm hover:shadow-md bg-slate-50/50"
+                  style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
                 >
-                  <div>
-                    <div className="font-medium text-slate-700 group-hover:text-slate-900">{link.label}</div>
-                    <div className="text-xs text-slate-400">{link.desc}</div>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-white shadow-sm border border-slate-100 ${link.color} group-hover:scale-110 transition-transform`}>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={link.icon} />
+                    </svg>
                   </div>
-                  <svg className="w-4 h-4 text-slate-300 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  <div className="flex-1">
+                    <div className="font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{link.label}</div>
+                    <div className="text-xs font-medium text-slate-500">{link.desc}</div>
+                  </div>
+                  <svg className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                   </svg>
                 </Link>
               ))}
@@ -565,27 +599,28 @@ export default function DashboardPage() {
           </div>
 
           {/* System Status */}
-          <div className="bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-900">Status do Sistema</h2>
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${systemHealth.api ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${systemHealth.api ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                {systemHealth.api ? 'Online' : 'Offline'}
+          <div className="bg-gradient-to-b from-slate-900 to-slate-800 rounded-3xl border border-slate-700 p-6 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/20 rounded-full blur-[50px] pointer-events-none"></div>
+            <div className="flex items-center justify-between mb-6 relative z-10">
+              <h2 className="text-lg font-bold text-white">Status do Sistema</h2>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-full shadow-inner ${systemHealth.api ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${systemHealth.api ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                {systemHealth.api ? 'ONLINE' : 'OFFLINE'}
               </span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3 relative z-10">
               {[
-                { name: 'API', status: systemHealth.api ? 'OK' : 'Erro', ok: systemHealth.api },
+                { name: 'API Services', status: systemHealth.api ? 'Operacional' : 'Erro Crítico', ok: systemHealth.api },
                 { name: 'Banco de Dados', status: systemHealth.db ? 'Conectado' : 'Verificando...', ok: systemHealth.db },
-                { name: 'Redis', status: systemHealth.redis ? 'Conectado' : 'Verificando...', ok: systemHealth.redis },
-                { name: 'Dispositivos', status: stats.devices > 0 ? `${stats.devices} cadastrado(s)` : 'Nenhum', ok: stats.devices > 0 },
+                { name: 'Redis Cache', status: systemHealth.redis ? 'Conectado' : 'Verificando...', ok: systemHealth.redis },
+                { name: 'Integração de Relógios', status: stats.devices > 0 ? `${stats.devices} ativos` : 'Nenhum', ok: stats.devices > 0 },
               ].map((service) => (
-                <div key={service.name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-1.5 h-1.5 rounded-full ${service.ok ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    <span className="text-sm text-slate-600">{service.name}</span>
+                <div key={service.name} className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-white/5 border border-white/5 backdrop-blur-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${service.ok ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`} />
+                    <span className="text-sm font-semibold text-slate-200">{service.name}</span>
                   </div>
-                  <span className={`text-xs font-medium ${service.ok ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  <span className={`text-xs font-bold ${service.ok ? 'text-emerald-400' : 'text-slate-400'}`}>
                     {service.status}
                   </span>
                 </div>
