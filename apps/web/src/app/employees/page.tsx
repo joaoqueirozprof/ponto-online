@@ -9,6 +9,7 @@ interface Employee {
   id: string;
   name: string;
   cpf: string;
+  pis: string;
   email: string;
   phone: string;
   position: string;
@@ -53,6 +54,7 @@ interface Toast {
 interface FormData {
   name: string;
   cpf: string;
+  pis: string;
   email: string;
   phone: string;
   position: string;
@@ -67,6 +69,7 @@ const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 
 const initialFormData: FormData = {
   name: '',
   cpf: '',
+  pis: '',
   email: '',
   phone: '',
   position: '',
@@ -200,6 +203,7 @@ export default function EmployeesPage() {
     setFormData({
       name: employee.name,
       cpf: employee.cpf,
+      pis: employee.pis || '',
       email: employee.email || '',
       phone: employee.phone || '',
       position: employee.position || '',
@@ -411,6 +415,20 @@ export default function EmployeesPage() {
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
                 placeholder="XXX.XXX.XXX-XX"
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                PIS/PASEP
+                <span className="text-xs text-amber-600 font-normal ml-1">(necessário para sync do ponto)</span>
+              </label>
+              <input
+                type="text"
+                value={formData.pis}
+                onChange={(e) => setFormData({ ...formData, pis: e.target.value })}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-900"
+                placeholder="XXX.XXXXX.XX-X"
               />
             </div>
 

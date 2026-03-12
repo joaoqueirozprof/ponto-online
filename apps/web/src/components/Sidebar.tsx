@@ -141,8 +141,14 @@ export default function Sidebar() {
     try {
       const r = await apiClient.post('/auto-sync/sync-all');
       const result = r.data;
-      const total = result?.totalNewPunches ?? result?.results?.reduce((s: number, d: any) => s + (d.newPunches || 0), 0) ?? 0;
-      setSyncResult({ type: 'success', msg: `${total} batida${total !== 1 ? 's' : ''} importada${total !== 1 ? 's' : ''}` });
+      const total = result?.totalNew ?? result?.devices?.reduce((s: number, d: any) => s + (d.newRecords || 0), 0) ?? 0;
+      const dupes = result?.devices?.reduce((s: number, d: any) => s + (d.duplicates || 0), 0) ?? 0;
+      const msg = total > 0
+        ? `${total} batida${total !== 1 ? 's' : ''} nova${total !== 1 ? 's' : ''}`
+        : dupes > 0
+          ? `Sem novidades (${dupes} já importadas)`
+          : 'Sincronizado';
+      setSyncResult({ type: 'success', msg });
     } catch (err: any) {
       setSyncResult({ type: 'error', msg: err?.response?.data?.message || err?.message || 'Falha' });
     } finally {
