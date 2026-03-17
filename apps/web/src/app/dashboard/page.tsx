@@ -4,7 +4,19 @@ import { useAuth } from '@/components/AuthProvider';
 import { apiClient } from '@/lib/api';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  PieChart,
+  Pie,
+} from 'recharts';
 
 interface DashboardStats {
   employees: number;
@@ -484,53 +496,76 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Weekly Chart Premium */}
-      {weekData.length > 0 && (
-        <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
-          <div className="flex items-center justify-between mb-6">
+      {/* Weekly Chart Recharts */}
+      <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
+        <div className="flex items-center justify-between mb-6">
+          <div>
             <h2 className="text-lg font-bold text-slate-800">Registros dos Últimos 7 Dias</h2>
-            <div className="p-2 bg-indigo-50 rounded-lg">
-              <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-              </svg>
-            </div>
+            <p className="text-sm text-slate-500">Volume de batidas diárias capturadas pelos dispositivos</p>
           </div>
-          <div className="flex items-end justify-between gap-3 sm:gap-4 relative" style={{ height: '180px' }}>
-            {/* Guide lines */}
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-              <div className="w-full border-t border-slate-200/50"></div>
-              <div className="w-full border-t border-slate-200/50"></div>
-              <div className="w-full border-t border-slate-200/50"></div>
-              <div className="w-full border-t border-slate-200/50"></div>
-            </div>
-            
-            {weekData.map((day, i) => {
-              const maxCount = Math.max(...weekData.map((d) => d.count), 1);
-              const heightPct = Math.max((day.count / maxCount) * 100, 6);
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full relative z-10 group cursor-default">
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 bg-slate-800 text-white text-xs font-bold py-1 px-2 rounded-md whitespace-nowrap shadow-lg">
-                    {day.count} batidas
-                  </div>
-                  <div className="text-sm font-bold text-slate-700 mb-1.5">{day.count > 0 ? day.count : ''}</div>
-                  <div
-                    className={`w-full max-w-[48px] rounded-t-xl transition-all duration-700 ease-out shadow-inner relative overflow-hidden ${day.isToday ? 'bg-gradient-to-t from-indigo-500 to-indigo-400' : 'bg-gradient-to-t from-indigo-200 to-indigo-100 hover:from-indigo-300 hover:to-indigo-200'}`}
-                    style={{ height: `${heightPct}%` }}
-                  >
-                    {day.isToday && <div className="absolute top-0 left-0 right-0 h-2 bg-white/20"></div>}
-                  </div>
-                  <div className={`text-sm mt-3 ${day.isToday ? 'font-black text-indigo-600' : 'font-semibold text-slate-500'}`}>
-                    {day.label}
-                  </div>
-                  <div className={`text-[10px] font-medium ${day.isToday ? 'text-indigo-400' : 'text-slate-400'}`}>
-                    {day.date}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="p-2 bg-indigo-50 rounded-lg">
+            <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+            </svg>
           </div>
         </div>
-      )}
+        
+        <div className="h-[250px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weekData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="label" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#64748b', fontSize: 12, fontWeight: 500 }}
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#64748b', fontSize: 12 }} 
+              />
+              <Tooltip 
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={{ 
+                  borderRadius: '12px', 
+                  border: 'none', 
+                  boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                  padding: '8px 12px'
+                }}
+                labelStyle={{ fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' }}
+                itemStyle={{ fontSize: '12px' }}
+                formatter={(value: number) => [`${value} batidas`, 'Registros']}
+              />
+              <Bar 
+                dataKey="count" 
+                radius={[6, 6, 0, 0]} 
+                barSize={40}
+              >
+                {weekData.map((entry, index) => (
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={entry.isToday ? '#6366f1' : '#e2e8f0'} 
+                    className="hover:fill-indigo-400 transition-all duration-300"
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
+        <div className="flex justify-center gap-6 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
+            <span className="text-xs font-medium text-slate-500">Hoje</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-slate-200"></div>
+            <span className="text-xs font-medium text-slate-500">Dias Anteriores</span>
+          </div>
+        </div>
+      </div>
 
       {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -570,6 +605,55 @@ export default function DashboardPage() {
 
         {/* Quick Links + Status */}
         <div className="space-y-6">
+          {/* Timesheet Status Pie Chart */}
+          <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
+            <h2 className="text-lg font-bold text-slate-800 mb-4">Status das Folhas</h2>
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Pendentes', value: stats.pendingTimesheets, color: '#f59e0b' },
+                      { name: 'Aprovadas', value: stats.approvedTimesheets, color: '#10b981' },
+                    ]}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {[
+                      { name: 'Pendentes', value: stats.pendingTimesheets, color: '#f59e0b' },
+                      { name: 'Aprovadas', value: stats.approvedTimesheets, color: '#10b981' },
+                    ].map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none mt-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-slate-800">{stats.pendingTimesheets + stats.approvedTimesheets}</div>
+                  <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Total</div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center gap-4 mt-2">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
+                <span className="text-[11px] font-medium text-slate-600">Pendentes</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                <span className="text-[11px] font-medium text-slate-600">Aprovadas</span>
+              </div>
+            </div>
+          </div>
+
           {/* Quick Links */}
           <div className="bg-white/90 backdrop-blur-xl rounded-3xl border border-white/80 p-6 shadow-xl shadow-slate-200/50">
             <h2 className="text-lg font-bold text-slate-800 mb-5">Acesso Rápido</h2>
